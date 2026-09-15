@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+
+members = [
+	"gpu-api",
+	"gpu-api-relay",
+	"gpu-api-dto",
+	"test-app-gpu-api",
+	"test-server-gpu-api",
+	"model-utils",
+	"model-load"
+]

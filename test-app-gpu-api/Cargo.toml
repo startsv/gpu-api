@@ -1,0 +1,41 @@
+[package]
+name = "test-app-gpu-api"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+log = "*"
+fern = { version = "*", features = ["colored"] }
+serde_json = "*"
+winit = {version = "*" }
+bytemuck = "*"
+glam = "0.33"
+image = { version = "*", default-features = false, features = ["png", "jpeg"] }
+gltf = "*"
+gpu-api = { path = "../gpu-api" }
+gpu-api-dto = { path = "../gpu-api-dto" }
+model-load = { path = "../model-load" }
+gpu-api-relay = { path = "../gpu-api-relay" }
+world = { path = "../../world/world" }
+bounds = { path = "../../bounds" }
+mesh-gen = { path = "../../cgi/mesh-gen" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = "*"
+tokio = { version = "*", features = ["rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "*"
+console_error_panic_hook = "*"
+console_log = "*"
+wasm-bindgen = "*"
+wasm-bindgen-futures = "*"
+js-sys = "*"
+web-sys = { version = "*", features = [
+    "Location", "Blob", "BlobPropertyBag", "MessageEvent", "Url", "Worker",
+    "Headers", "Request", "RequestInit", "RequestMode", "Response", "Clipboard"
+]}
+wgpu = { version = "*", features = ["webgl"] }

@@ -1,0 +1,16 @@
+[package]
+name = "model-utils"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+log = "*"
+env_logger = "*"
+serde_json = "*"
+lz4_flex = "*"
+image = "*"
+gpu-api-dto = { path = "../gpu-api-dto" }
+model-load = { path = "../model-load" }

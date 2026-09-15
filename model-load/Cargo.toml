@@ -1,0 +1,19 @@
+[package]
+name = "model-load"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+log = "*"
+lz4_flex = "*"
+image = "*"
+glam = "*"
+bytemuck = "*"
+gltf = { version = "*", features = [
+    "KHR_materials_pbrSpecularGlossiness",
+    "KHR_lights_punctual"
+] }
+gpu-api-dto = { path = "../gpu-api-dto" }

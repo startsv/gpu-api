@@ -1,0 +1,23 @@
+[package]
+name = "gpu-api"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+log = "*"
+half = "*"
+bytemuck = "*"
+bytemuck_derive = "*"
+glam = { version = "0.33", features = ["bytemuck"] }
+lz4_flex = "*"
+image = { version = "*", default-features = false, features = ["png", "jpeg"] }
+wgpu = "*"
+ktx2 = "*"
+gpu-api-relay = { path = "../gpu-api-relay" }
+gpu-api-dto = { path = "../gpu-api-dto" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "*"

@@ -1,0 +1,12 @@
+[package]
+name = "gpu-api-relay"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+bytemuck = "*"
+bytemuck_derive = "*"
+wincode = { version = "*", features = ["derive"] }
+glam = "0.33"
+bounds = { path = "../../bounds" }
