@@ -7,7 +7,7 @@ edition = "2024"
 
 [dependencies]
 
-wincode = { version = "*", features = ["derive"] }
+wincode = { git = "https://github.com/anza-xyz/wincode", features = ["derive"] }
 serde = "*"
 serde_derive = "*"
 lz4_flex = "*"
