@@ -713,11 +713,11 @@ dependencies = [
 name = "data-arena"
 version = "0.1.0"
 dependencies = [
- "ecow 0.3.1",
+ "ecow",
  "log",
  "serde",
  "serde_derive",
- "wincode 0.6.1 (git+https://github.com/anza-xyz/wincode)",
+ "wincode",
 ]
 
 [[package]]
@@ -802,12 +802,6 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
-
-[[package]]
-name = "ecow"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78e4f79b296fbaab6ce2e22d52cb4c7f010fe0ebe7a32e34fa25885fd797bd02"
 
 [[package]]
 name = "ecow"
@@ -1207,7 +1201,7 @@ dependencies = [
  "lz4_flex",
  "serde",
  "serde_derive",
- "wincode 0.6.1 (git+https://github.com/anza-xyz/wincode)",
+ "wincode",
 ]
 
 [[package]]
@@ -1218,7 +1212,7 @@ dependencies = [
  "bytemuck",
  "bytemuck_derive",
  "glam",
- "wincode 0.6.1 (git+https://github.com/anza-xyz/wincode)",
+ "wincode",
 ]
 
 [[package]]
@@ -1762,7 +1756,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "wincode 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wincode",
 ]
 
 [[package]]
@@ -1782,7 +1776,7 @@ version = "0.1.0"
 dependencies = [
  "bounds",
  "data-arena",
- "ecow 0.2.6",
+ "ecow",
  "glam",
  "hexasphere",
  "log",
@@ -1791,7 +1785,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "wincode 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wincode",
 ]
 
 [[package]]
@@ -1800,7 +1794,7 @@ version = "0.1.0"
 dependencies = [
  "bounds",
  "data-arena",
- "ecow 0.2.6",
+ "ecow",
  "glam",
  "gpu-api-relay",
  "log",
@@ -1809,7 +1803,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "wincode 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wincode",
 ]
 
 [[package]]
@@ -4037,41 +4031,15 @@ dependencies = [
 [[package]]
 name = "wincode"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfc6339f1ba427bf7ad7c42403b28e524832ba2ddb5eef1bb2cc3b85db6b7b75"
-dependencies = [
- "pastey 0.2.3",
- "proc-macro2",
- "quote",
- "thiserror 2.0.20",
- "uuid",
- "wincode-derive 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "wincode"
-version = "0.6.1"
 source = "git+https://github.com/anza-xyz/wincode#9a56191c33f1a956056d6b179cde27f91096aaba"
 dependencies = [
- "ecow 0.3.1",
+ "ecow",
  "pastey 0.2.3",
  "proc-macro2",
  "quote",
  "thiserror 2.0.20",
  "uuid",
- "wincode-derive 0.5.1 (git+https://github.com/anza-xyz/wincode)",
-]
-
-[[package]]
-name = "wincode-derive"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11d582d9fc9d813264407a9e16bfa16846ccf15ef032f9bbcd700741bdc00255"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "wincode-derive",
 ]
 
 [[package]]
