@@ -1,12 +1,13 @@
-use std::mem;
+use std::{mem, ops::Range};
 use std::ops::Mul;
+use bytemuck::{Pod, Zeroable};
 use wgpu::{DepthStencilState, RenderPass, TextureFormat};
 use glam::{Mat4, Vec3};
 
 pub const MAX_QUADS_COUNT: u64 = 1000;
 
 /// The properties of a quad.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct SolidQuad {
     /// The background color data of the quad.
@@ -43,20 +44,14 @@ pub struct SolidQuad {
     pub clip: [f32; 4]
 }
 
-unsafe impl bytemuck::Zeroable for SolidQuad {}
-unsafe impl bytemuck::Pod for SolidQuad {}
-
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Uniforms {
     pub transform: [f32; 16],
     pub scale: f32,
     pub _padding: f32,
     pub viewport_offset: [f32; 2],     
 }
-
-unsafe impl bytemuck::Pod for Uniforms {}
-unsafe impl bytemuck::Zeroable for Uniforms {}
 
 impl Uniforms {
     pub fn new(transformation: Transformation, scale: f32, viewport_offset: [f32; 2]) -> Uniforms {
@@ -96,12 +91,12 @@ impl Pipeline {
         render_pass.draw(0..6, 0..count);
     }
 
-    pub fn draw_range<'a>(&'a self, render_pass: &mut RenderPass<'a>, range_start: u32, range_end: u32) {
+    pub fn draw_range<'a>(&'a self, render_pass: &mut RenderPass<'a>, range: Range<u32>) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
-        render_pass.draw(0..6, range_start..range_end);
+        render_pass.draw(0..6, range);
     }
 
     pub fn new(device: &wgpu::Device, depth_stencil: Option<DepthStencilState>) -> Pipeline {

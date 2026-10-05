@@ -1,16 +1,14 @@
 use std::mem;
+use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ModelInstance {
     pub model_matrix: Mat4,
     pub is_animated: u32,
     pub padding: [u32; 3], 
 }
-
-unsafe impl bytemuck::Pod for ModelInstance {}
-unsafe impl bytemuck::Zeroable for ModelInstance {}
 
 impl ModelInstance {
     pub fn vertex_buffer_layout<'a>() -> wgpu::VertexBufferLayout<'a> {        

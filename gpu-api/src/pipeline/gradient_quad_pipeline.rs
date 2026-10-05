@@ -1,11 +1,10 @@
 use std::mem;
+use bytemuck::{Pod, Zeroable};
 use wgpu::{DepthStencilState, RenderPass, TextureFormat};
-use glam::{Mat4, Vec3};
-
 use crate::pipeline::solid_quad_pipeline::{MAX_QUADS_COUNT, Uniforms};
 
 /// The properties of a quad.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct GradientQuad {
     /// 8 colors, each channel = 16 bit float, 2 colors packed into 1 u32       
@@ -49,9 +48,6 @@ pub struct GradientQuad {
     /// Quad parts will be discarded if they are outside of component coordinates.
     pub clip: [f32; 4]
 }
-
-unsafe impl bytemuck::Zeroable for GradientQuad {}
-unsafe impl bytemuck::Pod for GradientQuad {}
 
 #[derive(Debug)]
 pub struct Pipeline {

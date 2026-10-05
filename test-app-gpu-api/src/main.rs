@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use fern::colors::{Color, ColoredLevelConfig};
 use glam::{Mat4, Vec3, vec3};
-use gpu_api_relay::model_bindless_data::{InstanceData, NodeData, PrimitiveMeta, SurfaceData, SurfaceCullingTask};
+use gpu_api_relay::model_bindless_data::{DrawIndexedIndirectCommand, InstanceData, NodeData, PrimitiveMeta, SurfaceCullingTask, SurfaceData, SurfaceMeshletDescription, SurfaceVertex};
 use log::*;
 use winit::{dpi::{PhysicalPosition, PhysicalSize}, event::{ElementState, Event, MouseScrollDelta, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::Window};
 use wgpu::{CurrentSurfaceTexture, DeviceDescriptor, ExperimentalFeatures, MemoryHints, RequestAdapterOptions, StoreOp};
@@ -229,16 +229,15 @@ async fn run() {
         visible_chunks: Vec::new(),
     };
     test_world.cull(&frustum, camera.position, &mut frame_data);
-
-    let mut surface_data = SurfaceData::default();
-    //generate_surface_meshlets(Vec3::ZERO, 0, 0, &mut surface_data);
+    
+    let surface_data = generate_test_surface(10, 10, 1.0);
 
     surface_resources.init(&queue, &surface_data.vertices, &surface_data.indices, &surface_data.meshlets, &init_data.factors, &surface_data.indirect_commands);
     
     let mut surface_culling_tasks = Vec::new();    
     let mut model_culling_tasks = Vec::new();
     let mut global_instances = Vec::new();
-
+    
     surface_culling_tasks.push(SurfaceCullingTask {
         start_meshlet_index: 0,
         meshlet_count: surface_data.meshlets.len() as u32,
@@ -860,7 +859,7 @@ async fn run() {
                                     }
                                 );
             
-                                //surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
+                                surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &indirect_commands);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
                                 line_pipeline.draw(&mut render_pass, line_indices.len() as u32);
@@ -890,8 +889,7 @@ async fn run() {
 fn main() {
     #[cfg(target_arch = "wasm32")]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));    
-
-    // 2. Настройка логгера через fern
+    
     let mut dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
             let colors = ColoredLevelConfig::new()
@@ -909,8 +907,7 @@ fn main() {
         })
         .level(log::LevelFilter::Info)
         .level_for("wgpu", log::LevelFilter::Debug);
-
-    // Куда выводим результат?
+    
     #[cfg(target_arch = "wasm32")]
     {
         dispatch = dispatch.chain(fern::Output::call(console_log::log));
@@ -934,4 +931,117 @@ fn main() {
         console_log::init_with_level(log::Level::Warn).expect("Could not initialize logger");
         wasm_bindgen_futures::spawn_local(run(event_loop, window));
     }
+}
+
+const MESHLET_SIZE: u32 = 8;
+const VERTICES_PER_MESHLET: u32 = MESHLET_SIZE * MESHLET_SIZE;
+
+pub fn generate_test_surface(
+    width_in_meshlets: u32,
+    depth_in_meshlets: u32,
+    vertex_spacing: f32,
+) -> SurfaceData {
+    let mut surface_data = SurfaceData::new();    
+    
+    let total_meshlets = width_in_meshlets * depth_in_meshlets;
+        
+    surface_data.vertices.reserve((total_meshlets * VERTICES_PER_MESHLET) as usize);
+    
+    let indices_per_meshlet = (MESHLET_SIZE - 1) * (MESHLET_SIZE - 1) * 6;
+    surface_data.indices.reserve((total_meshlets * indices_per_meshlet) as usize);
+    surface_data.meshlets.reserve(total_meshlets as usize);
+    
+    let meshlet_world_size = (MESHLET_SIZE - 1) as f32 * vertex_spacing;
+
+    let mut current_vertex_offset = 0;
+    let mut current_index_offset = 0;
+
+    for mz in 0..depth_in_meshlets {
+        for mx in 0..width_in_meshlets {
+            let mut aabb_min = [f32::MAX, f32::MAX, f32::MAX];
+            let mut aabb_max = [f32::MIN, f32::MIN, f32::MIN];
+
+            let meshlet_x_origin = mx as f32 * meshlet_world_size;
+            let meshlet_z_origin = mz as f32 * meshlet_world_size;
+            
+            for lz in 0..MESHLET_SIZE {
+                for lx in 0..MESHLET_SIZE {
+                    let world_x = meshlet_x_origin + (lx as f32 * vertex_spacing);
+                    let world_z = meshlet_z_origin + (lz as f32 * vertex_spacing);
+                    
+                    let world_y = (world_x * 0.1).sin() * 5.0 + (world_z * 0.05).cos() * 8.0;
+                    
+                    let nx = -0.1 * (world_x * 0.1).cos() * 5.0;
+                    let nz = -0.05 * -(world_z * 0.05).sin() * 8.0;
+                    let mut normal = [nx, 1.0, nz];
+                    
+                    let len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+                    normal[0] /= len;
+                    normal[1] /= len;
+                    normal[2] /= len;
+
+                    let vertex = SurfaceVertex {
+                        position: [world_x, world_y, world_z],
+                        _pad0: 0.0,
+                        normal,
+                        _pad1: 0.0,
+                    };
+
+                    surface_data.vertices.push(vertex);
+                    
+                    aabb_min[0] = aabb_min[0].min(world_x);
+                    aabb_min[1] = aabb_min[1].min(world_y);
+                    aabb_min[2] = aabb_min[2].min(world_z);
+
+                    aabb_max[0] = aabb_max[0].max(world_x);
+                    aabb_max[1] = aabb_max[1].max(world_y);
+                    aabb_max[2] = aabb_max[2].max(world_z);
+                }
+            }
+            
+            for lz in 0..(MESHLET_SIZE - 1) {
+                for lx in 0..(MESHLET_SIZE - 1) {
+                    
+                    let i0 = lz * MESHLET_SIZE + lx;
+                    let i1 = lz * MESHLET_SIZE + (lx + 1);
+                    let i2 = (lz + 1) * MESHLET_SIZE + lx;
+                    let i3 = (lz + 1) * MESHLET_SIZE + (lx + 1);
+                    
+                    surface_data.indices.push(current_vertex_offset + i0);
+                    surface_data.indices.push(current_vertex_offset + i2);
+                    surface_data.indices.push(current_vertex_offset + i1);
+
+                    surface_data.indices.push(current_vertex_offset + i1);
+                    surface_data.indices.push(current_vertex_offset + i2);
+                    surface_data.indices.push(current_vertex_offset + i3);
+                }
+            }
+            
+            let meshlet_index_count = (MESHLET_SIZE - 1) * (MESHLET_SIZE - 1) * 6;
+            
+            surface_data.meshlets.push(SurfaceMeshletDescription {
+                aabb_min,
+                vertex_offset: current_vertex_offset,
+                aabb_max,
+                index_offset: current_index_offset,
+                index_count: meshlet_index_count,
+                material_index: 0,
+                pad0: 0,
+                pad1: 0,
+            });
+
+            current_vertex_offset += VERTICES_PER_MESHLET;
+            current_index_offset += meshlet_index_count;
+        }
+    }
+    
+    surface_data.indirect_commands.push(DrawIndexedIndirectCommand {
+        index_count: 0,
+        instance_count: 0,
+        first_index: 0,
+        base_vertex: 0,
+        first_instance: 0,
+    });
+
+    surface_data
 }

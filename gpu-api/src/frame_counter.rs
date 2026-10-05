@@ -7,7 +7,7 @@ pub struct FrameCounter {
     #[cfg(not(target_arch = "wasm32"))]
     pub last_printed_instant: Instant,
     #[cfg(target_arch = "wasm32")]
-    pub last_printed_instant: webtime::Instant,
+    pub last_printed_instant: web_time::Instant,
     #[cfg(not(target_arch = "wasm32"))]
     pub last_frame_instant: Instant,
     #[cfg(target_arch = "wasm32")]

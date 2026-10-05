@@ -1,4 +1,5 @@
 use std::mem;
+use bytemuck::{Pod, Zeroable};
 use wgpu::{DepthStencilState, RenderPass, TextureFormat};
 use image::DynamicImage;
 use crate::pipeline::{solid_quad_pipeline::{Transformation, Uniforms}};
@@ -6,9 +7,9 @@ use crate::pipeline::{solid_quad_pipeline::{Transformation, Uniforms}};
 pub const MAX_IMAGE_QUADS_COUNT: u64 = 1000;
 
 /// The properties of a quad.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
-pub struct ImageQuad {    
+pub struct ImageQuad {
     /// The position of the [`Quad`].
     pub position: [f32; 2],
 
@@ -39,9 +40,6 @@ pub struct ImageQuad {
     /// Quad parts will be discarded if they are outside of component coordinates.
     pub clip: [f32; 4]    
 }
-
-unsafe impl bytemuck::Zeroable for ImageQuad {}
-unsafe impl bytemuck::Pod for ImageQuad {}
 
 #[derive(Debug)]
 pub struct Pipeline {
