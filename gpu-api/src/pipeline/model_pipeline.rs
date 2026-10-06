@@ -10,7 +10,6 @@ use model::ObjectGroup;
 pub mod model;
 pub mod model_instance;
 
-pub const CAMERA_UNIFORM_SIZE: u64 = 240;
 pub const INSTANCE_SIZE: u64 = 80;
 pub const MAX_MODEL_INSTANCES_COUNT: u64 = 100000;
 pub const JOINT_MATRICES_COUNT: usize = 128;

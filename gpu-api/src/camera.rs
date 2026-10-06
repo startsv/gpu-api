@@ -1,6 +1,8 @@
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use gpu_api_relay::model_bindless_data::CameraUniform;
 
+pub const CAMERA_UNIFORM_SIZE: u64 = size_of::<CameraUniform>() as u64;
+
 pub struct Camera {    
     pub angle_y: f32,
     pub angle_xz: f32,
@@ -16,10 +18,9 @@ impl Camera {
     pub fn get_uniform(&self) -> CameraUniform {
         CameraUniform {
             camera_position: self.position.to_array(),
-            padding: 0,
-            view: self.view,
-            projection: self.view_proj,
-            frustum: gpu_api_relay::frustum::Frustum::to_uniform(self.view_proj),
+            padding: 0,            
+            view_proj: self.view_proj,
+            frustum_planes: gpu_api_relay::frustum::Frustum::to_uniform(self.view_proj),
         }
     }
 

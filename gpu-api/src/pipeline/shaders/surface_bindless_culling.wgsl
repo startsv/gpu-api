@@ -1,8 +1,7 @@
 struct CameraUniform {
     camera_position: vec3<f32>,
-    padding: u32,
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
+    padding: u32,    
+    view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
 };
 

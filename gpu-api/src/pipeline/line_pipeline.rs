@@ -1,22 +1,20 @@
 use std::mem;
+use bytemuck::{Pod, Zeroable};
 use wgpu::{DepthStencilState, RenderPass, TextureFormat, util::DeviceExt};
 use gpu_api_relay::model_bindless_data::CameraUniform;
 
 pub const LINE_VERTICES_COUNT: u64 = 20000;
 
-/// The properties of a quad.
-#[derive(Clone, Copy, Debug)]
+/// The properties of a line.
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct LineVertex {
-    /// The background color data of the quad.
+    /// The color of the line.
     pub color: [f32; 4],
 
     /// The position of line point.
     pub pos: [f32; 3],
 }
-
-unsafe impl bytemuck::Zeroable for LineVertex {}
-unsafe impl bytemuck::Pod for LineVertex {}
 
 #[derive(Debug)]
 pub struct Pipeline {
@@ -36,7 +34,7 @@ impl Pipeline {
         render_pass.draw_indexed(0..count, 0, 0..1);        
     }    
 
-    pub fn new(device: &wgpu::Device, camera_uniform: &CameraUniform, depth_stencil: Option<DepthStencilState>) -> Pipeline {        
+    pub fn new(device: &wgpu::Device, camera_uniform: &CameraUniform, depth_stencil: Option<DepthStencilState>) -> Pipeline {
         let camera_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Camera Buffer"),
@@ -72,7 +70,7 @@ impl Pipeline {
             label: Some("camera_bind_group")
         });    
 
-        let layout =
+        let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Line pipeline"),                
                 bind_group_layouts: &[
@@ -81,18 +79,17 @@ impl Pipeline {
                 immediate_size: 0
             });
 
-        let shader =
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Line shader"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-                    include_str!("shaders/line.wgsl")
-                )),
-            });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {            
+            label: Some("Line shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
+                include_str!("shaders/line.wgsl")
+            )),
+        });
 
         let pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Line pipeline"),
-                layout: Some(&layout),
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
@@ -106,8 +103,7 @@ impl Pipeline {
                             1 => Float32x3,
                         )
                     })],
-                    compilation_options:
-                        wgpu::PipelineCompilationOptions::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -150,14 +146,14 @@ impl Pipeline {
             label: Some("Line vertex buffer"),
             size: mem::size_of::<LineVertex>() as u64 * LINE_VERTICES_COUNT,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false
+            mapped_at_creation: false,
         });
 
         let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Line index buffer"),
             size: mem::size_of::<u32>() as u64 * LINE_VERTICES_COUNT,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false
+            mapped_at_creation: false,
         });
 
         Pipeline {

@@ -5,6 +5,7 @@ pub mod pipeline {
     pub mod solid_quad_pipeline;
     pub mod gradient_quad_pipeline;
     pub mod line_pipeline;
+    pub mod aa_line_pipeline;
     pub mod image_pipeline;
     pub mod model_pipeline;
     pub mod model_bindless_pipeline;

@@ -6,10 +6,9 @@ use glam::{Mat4, Vec4};
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct CameraUniform {
     pub camera_position: [f32; 3],
-    pub padding: u32,
-    pub view: Mat4,
-    pub projection: Mat4,
-    pub frustum: [Vec4; 6],
+    pub padding: u32,    
+    pub view_proj: Mat4,
+    pub frustum_planes: [Vec4; 6],
 }
 
 #[repr(C)]

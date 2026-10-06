@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use glam::Mat4;
 use gpu_api_dto::TextureType;
-use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, InstanceData, MaterialFactors, NodeData, PrimitiveMeta, Vertex, VisibleInstanceData};
+use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, InstanceData, MaterialFactors, NodeData, Vertex, VisibleInstanceData};
 use log::info;
 use wgpu::{ComputePass, RenderPass, TextureFormat, util::{DeviceExt, StagingBelt}};
-use crate::{camera::Camera, pipeline::{clear_commands_pipeline::{self, ClearCommandsPipeline}, model_pipeline::{CAMERA_UNIFORM_SIZE, model::InitData}}};
+use crate::{camera::{CAMERA_UNIFORM_SIZE, Camera}, pipeline::model_pipeline::model::InitData};
 use gpu_api_relay::model_bindless_data::CameraUniform;
 
 pub const MAX_VERTICES: u64 = 1_000_000;

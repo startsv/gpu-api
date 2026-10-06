@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use fern::colors::{Color, ColoredLevelConfig};
-use glam::{Mat4, Vec3, vec3};
+use glam::{Mat4, vec3};
 use gpu_api_relay::model_bindless_data::{DrawIndexedIndirectCommand, InstanceData, NodeData, PrimitiveMeta, SurfaceCullingTask, SurfaceData, SurfaceMeshletDescription, SurfaceVertex};
 use log::*;
 use winit::{dpi::{PhysicalPosition, PhysicalSize}, event::{ElementState, Event, MouseScrollDelta, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::Window};
@@ -9,7 +9,7 @@ use wgpu::{CurrentSurfaceTexture, DeviceDescriptor, ExperimentalFeatures, Memory
 use winit::{event_loop::EventLoopProxy, platform::web::{WindowExtWebSys, EventLoopExtWebSys}};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
-use gpu_api::{camera::create_camera, frame_counter::FrameCounter, pipeline::{self, image_pipeline::{self, ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::{CAMERA_UNIFORM_SIZE, model::{Object, ObjectGroup}}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
+use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
 
@@ -256,7 +256,12 @@ async fn run() {
     
     let solid_quad_pipeline = pipeline::solid_quad_pipeline::Pipeline::new(&device, depth_stencil_state.clone());
     let gradient_quad_pipeline = pipeline::gradient_quad_pipeline::Pipeline::new(&device, depth_stencil_state.clone());
-    let line_pipeline = pipeline::line_pipeline::Pipeline::new(&device, &camera_uniform, depth_stencil_state);
+    let line_pipeline = pipeline::line_pipeline::Pipeline::new(&device, &camera_uniform, depth_stencil_state.clone());
+    let aa_line_pipeline = pipeline::aa_line_pipeline::Pipeline::new(&device, &camera_uniform, depth_stencil_state);
+
+
+    let mut aa_line_instances = Vec::new();
+    generate_grid(&mut aa_line_instances, 10, 1.0, 5.0);
 
     let transformation = solid_quad_pipeline::Transformation::orthographic(layout.size.width, layout.size.height);
     let mut quad_uniforms = solid_quad_pipeline::Uniforms::new(transformation, scale_factor as f32, [0.0, 0.0]);
@@ -561,6 +566,17 @@ async fn run() {
                                 index_buffer.copy_from_slice(index_bytes);
                             }
 
+                            {
+                                let instance_bytes = bytemuck::cast_slice(&aa_line_instances);
+                                let mut instance_buffer = staging_belt.write_buffer(
+                                    &mut encoder,
+                                    &aa_line_pipeline.instance_buffer,
+                                    0,
+                                    wgpu::BufferSize::new(instance_bytes.len() as u64).expect("Failed to create aa line vertex buffer size")
+                                );
+                                instance_buffer.copy_from_slice(instance_bytes);                                
+                            }
+
                             camera.update(layout.size.width as f32, layout.size.height as f32);
             
                             {                                                                                            
@@ -581,6 +597,14 @@ async fn run() {
                                     wgpu::BufferSize::new(CAMERA_UNIFORM_SIZE).expect("Failed to allocate line camera slice")                                    
                                 );            
                                 line_camera_slice.copy_from_slice(bytemuck::bytes_of(&camera_uniform));
+
+                                let mut aa_line_camera_slice = staging_belt.write_buffer(
+                                    &mut encoder,
+                                    &aa_line_pipeline.camera_buffer,
+                                    0,
+                                    wgpu::BufferSize::new(CAMERA_UNIFORM_SIZE).expect("Failed to allocate line camera slice")                                    
+                                );            
+                                aa_line_camera_slice.copy_from_slice(bytemuck::bytes_of(&camera_uniform));
                             }
 
                             {
@@ -863,6 +887,7 @@ async fn run() {
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &indirect_commands);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
                                 line_pipeline.draw(&mut render_pass, line_indices.len() as u32);
+                                aa_line_pipeline.draw(&mut render_pass, aa_line_instances.len() as u32);
                                 image_pipeline.draw(&mut render_pass, &image_objects);
                                 gradient_quad_pipeline.draw(&mut render_pass, gradient_quads.len() as u32);
                                 solid_quad_pipeline.draw(&mut render_pass, quads.len() as u32);
@@ -1044,4 +1069,47 @@ pub fn generate_test_surface(
     });
 
     surface_data
+}
+
+pub fn generate_grid(
+    lines: &mut Vec<AaLineInstance>, 
+    slices: i32, 
+    step: f32, 
+    width: f32
+) {
+    let half_size = slices as f32 * step;
+        
+    let default_color = [0.3, 0.3, 0.3, 1.0];
+    let axis_x_color  = [0.8, 0.2, 0.2, 1.0];
+    let axis_z_color  = [0.2, 0.2, 0.8, 1.0];
+
+    for i in -slices..=slices {
+        let current_coord = i as f32 * step;
+        
+        let color_z = if i == 0 { 
+            axis_z_color
+        } else { 
+            default_color 
+        };
+        
+        lines.push(AaLineInstance {
+            color: color_z,
+            width,
+            start_pos: [current_coord, 0.0, -half_size],
+            end_pos:   [current_coord, 0.0, half_size],
+        });
+        
+        let color_x = if i == 0 { 
+            axis_x_color
+        } else { 
+            default_color 
+        };
+
+        lines.push(AaLineInstance {
+            color: color_x,
+            width,
+            start_pos: [-half_size, 0.0, current_coord],
+            end_pos:   [half_size, 0.0, current_coord],
+        });
+    }
 }

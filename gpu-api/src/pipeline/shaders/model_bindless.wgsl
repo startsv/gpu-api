@@ -20,9 +20,8 @@ struct MaterialFactors {
 
 struct CameraUniform {
     camera_position: vec3<f32>,
-    padding: u32,
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
+    padding: u32,    
+    view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
 };
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
@@ -147,7 +146,7 @@ fn vs_main(
     let model_position = model_matrix * vec4<f32>(vertex_input.position, 1.0);
     
     var out: FragmentInput;
-    out.clip_position = camera.projection * model_position; 
+    out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
     out.uv = vertex_input.uv;
     out.material_index = render_data.material_index; 

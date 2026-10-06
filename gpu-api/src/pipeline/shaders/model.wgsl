@@ -18,12 +18,10 @@ var emissive_texture: texture_2d<f32>;
 @group(0) @binding(8)
 var emissive_sampler: sampler;
 
-// Camera
 struct CameraUniform {
     camera_position: vec3<f32>,
-    padding: u32,
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
+    padding: u32,    
+    view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
 };
 
@@ -111,7 +109,7 @@ fn vs_main(vertex_input: VertexInput, instance: InstanceInput) -> FragmentInput 
     let model_position = model_matrix * vec4<f32>(vertex_input.position, 1.0);
     
     var out: FragmentInput;
-    out.clip_position = camera.projection * model_position; // Here camera.projection already P*V
+    out.clip_position = camera.view_proj * model_position;
     out.world_position = model_position.xyz;
     out.uv = vertex_input.uv;
     
