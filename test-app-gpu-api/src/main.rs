@@ -261,7 +261,7 @@ async fn run() {
 
 
     let mut aa_line_instances = Vec::new();
-    generate_grid(&mut aa_line_instances, 10, 1.0, 5.0);
+    generate_grid(&mut aa_line_instances, 10, 1.0, 4.0);
 
     let transformation = solid_quad_pipeline::Transformation::orthographic(layout.size.width, layout.size.height);
     let mut quad_uniforms = solid_quad_pipeline::Uniforms::new(transformation, scale_factor as f32, [0.0, 0.0]);
