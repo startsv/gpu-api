@@ -851,7 +851,7 @@ async fn run() {
                                     timestamp_writes: None,
                                 });
 
-                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, &model_culling_tasks);
+                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, 100);
                             }
 
                             model_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &global_instances, &init_data.nodes,
@@ -865,10 +865,9 @@ async fn run() {
                                     timestamp_writes: None,
                                 });
 
-                                model_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, &model_culling_tasks);
+                                model_bindless_resources.compute_gpu_driven_frame(&mut compute_pass);
                             }
                             
-
                             {
                                 let mut render_pass = encoder.begin_render_pass(
                                     &wgpu::RenderPassDescriptor {
@@ -907,7 +906,7 @@ async fn run() {
 
                                 static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &static_test_scene.indirect_commands);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
-                                model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &indirect_commands);
+                                model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
                                 line_pipeline.draw(&mut render_pass, line_indices.len() as u32);
                                 aa_line_pipeline.draw(&mut render_pass, aa_line_instances.len() as u32);

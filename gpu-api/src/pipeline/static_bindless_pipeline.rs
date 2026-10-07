@@ -784,15 +784,15 @@ impl StaticBindlessResources {
     pub fn compute_gpu_driven_frame(
         &self,
         compute_pass: &mut wgpu::ComputePass,
-        culling_tasks: &[CullingTask]
+        total_instances_count: u32, // Передаем общее число кубов (например, 100)
     ) {        
         compute_pass.set_pipeline(&self.culling_compute_pipeline);
         compute_pass.set_bind_group(0, &self.camera_bind_group, &[]);
         compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]);
         
-        // Диспетчеризируем потоки по количеству ЗАДАЧ КУЛЛИНГА ОБЪЕКТОВ.
-        // Количество рабочих групп строго равно числу задач (culling_tasks.len()).
-        compute_pass.dispatch_workgroups(culling_tasks.len() as u32, 1, 1);
+        // Распределяем группы по количеству объектов сцены
+        let workgroup_count = (total_instances_count + 63) / 64;
+        compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
 
     pub fn draw_gpu_driven_frame(

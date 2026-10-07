@@ -86,48 +86,34 @@ fn is_aabb_visible(aabb_min: vec3<f32>, aabb_max: vec3<f32>) -> bool {
 
 @compute @workgroup_size(64)
 fn culling_main(
-    @builtin(workgroup_id) workgroup_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
+    @builtin(global_invocation_id) global_id: vec3<u32>
 ) {
-    let task_index = workgroup_id.x;
-    if (task_index >= arrayLength(&culling_tasks)) { return; }
+    let global_instance_id = global_id.x;
+    let task = culling_tasks[0u]; 
     
-    let task = culling_tasks[task_index];
-        
-    for (var i = local_id.x; i < task.object_count; i = i + 64u) {
-        let global_instance_id = task.start_object_index + i;
-        let instance = global_instances[global_instance_id];
-        let mesh_info = global_mesh_infos[instance.primitive_index];
-                
-        let m = instance.model_matrix;
-        
-        for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
-            let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
-            let meshlet = global_meshlets[global_meshlet_id];
+    if (global_instance_id >= task.object_count) { return; }
+    
+    let instance = global_instances[global_instance_id];
+    let mesh_info = global_mesh_infos[instance.primitive_index];
             
-            // ВРЕМЕННО ХАРДКОДИМ ИСТИНУ, ЧТОБЫ УВИДЕТЬ ВСЕ КУБЫ
-            if (true) {                                
-                let cmd_id = instance.base_command_id + m_idx;
-                                
-                indirect_commands[cmd_id].index_count = meshlet.index_count;
-                indirect_commands[cmd_id].first_index = meshlet.index_offset;
-                indirect_commands[cmd_id].base_vertex = 0; // Строго 0 для Vertex Pulling!
-                
-                // Выставляем instance_count в 1, чтобы GPU нарисовал этот мешлет
-                indirect_commands[cmd_id].instance_count = 1u;
-                                
-                // ПРЯМАЯ ЗАПИСЬ: Записываем ID инстанса прямо в слот, равный cmd_id
-                let write_index = cmd_id;
-                                            
-                visible_instances[write_index].instance_id = global_instance_id;
-                visible_instances[write_index].material_index = instance.material_index;
-            } else {
-                // Если мешлет не прошел куллинг (в будущем)
-                let cmd_id = instance.base_command_id + m_idx;
-                indirect_commands[cmd_id].instance_count = 0u;
-            }
+    for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
+        
+        // ВРЕМЕННО ХАРДКОДИМ ИСТИНУ ДЛЯ ОТЛАДКИ ВЫВОДА ВСЕХ КУБОВ
+        if (true) {                                
+            // cmd_id равен строго 0 или 1 (индекс мешлета)
+            let cmd_id = m_idx; 
+                            
+            // Атомарно увеличиваем количество инстансов для этого мешлета
+            let local_slot = atomicAdd(&indirect_commands[cmd_id].instance_count, 1u);
+                            
+            // Вычисляем плотный индекс записи
+            // Для Мешлета 0: 0 + local_slot (диапазон 0..99)
+            // Для Мешлета 1: 100 + local_slot (диапазон 100..199)
+            let base_offset = indirect_commands[cmd_id].first_instance;
+            let write_index = base_offset + local_slot;
+                                        
+            visible_instances[write_index].instance_id = global_instance_id;
+            visible_instances[write_index].material_index = instance.material_index;
         }
     }
 }
-
-

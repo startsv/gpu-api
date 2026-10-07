@@ -116,49 +116,45 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
     let mut instances = Vec::new();
     let mut indirect_commands = Vec::new();
 
-    // Мы резервируем плотное пространство в буфере visible_instances под каждый возможный мешлет каждого объекта
-    let mut current_visible_instances_offset = 0u32;
+    // Создаем ВСЕГО 2 команды на всю сцену!
+    // Команда 0 рисует первую половину ВСЕХ видимых кубов
+    indirect_commands.push(DrawIndexedIndirectCommand {
+        index_count: 18,
+        instance_count: 0, // Заполнит шейдер
+        first_index: 0,
+        base_vertex: 0,
+        first_instance: 0, // Пишет в visible_instances с 0 по 99 slot
+    });
+
+    // Команда 1 рисует вторую половину ВСЕХ видимых кубов
+    indirect_commands.push(DrawIndexedIndirectCommand {
+        index_count: 18,
+        instance_count: 0, // Заполнит шейдер
+        first_index: 18,
+        base_vertex: 0,
+        first_instance: num_instances, // Пишет в visible_instances со 100 по 199 slot
+    });
 
     for i in 0..num_instances {
-        // Разносим кубы по оси X, чтобы их было удобно куллить фрустумом
         let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
         let model_matrix = Mat4::from_translation(position);
-
-        let base_cmd_id = i * 2; // Уникальный ID первой команды для куба i
-
 
         instances.push(InstanceData {
             model_matrix: model_matrix.to_cols_array_2d(),
             is_animated: 0,
-            node_index: 0, // Предполагаем корневую ноду без дополнительных сдвигов
+            node_index: 0,
             joints_offset: 0,
-            material_index: 0, // Используем первый материал из global_materials
-            primitive_index: 0, // Указывает на базовую indirect-команду для этого инстанса
-            pad0: base_cmd_id, pad1: 0, pad2: 0,
+            material_index: 0,
+            primitive_index: 0, // Ссылается на mesh_infos[0]
+            pad0: 0, // Не используется в этой схеме
+            pad1: 0, pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
             pad_aabb1: 0,
             aabb_max: [0.5, 0.5, 0.5],
             pad_aabb2: 0,
         });
-
-        // Создаем Draw-команды шаблона для КАЖДОГО мешлета этого инстанса
-        for m_idx in 0..2 {
-            let current_cmd_id = base_cmd_id + m_idx;
-
-            indirect_commands.push(DrawIndexedIndirectCommand {
-                index_count: 18, // Будет перезаписано шейдером, но заполняем для надежности
-                instance_count: 0, // Изначально 0, шейдер увеличит атомиком, если мешлет видим
-                first_index: (m_idx * 18) as u32,
-                base_vertex: 0,
-                // Критически важно: указываем уникальный диапазон в visible_instances для этого мешлета
-                // Каждый мешлет может отрендерить максимум 1 инстанс в своей команде.
-                first_instance: current_cmd_id,
-            });
-            current_visible_instances_offset += 1;
-        }
     }
 
-    // 4. Формируем одну глобальную задачу куллинга, которая обработает все сгенерированные объекты
     let culling_tasks = vec![CullingTask {
         start_object_index: 0,
         object_count: num_instances,
