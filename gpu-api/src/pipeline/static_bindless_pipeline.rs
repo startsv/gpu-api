@@ -89,6 +89,7 @@ impl StaticBindlessResources {
         queue: &wgpu::Queue,        
         camera_uniform: &CameraUniform,
         depth_stencil: Option<wgpu::DepthStencilState>,
+        instances_count: usize,
         total_meshlets_commands_count: usize,        
         init_data: &InitData,
     ) -> Self {                        
@@ -118,16 +119,7 @@ impl StaticBindlessResources {
             size: MAX_INSTANCES * size_of::<NodeData>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
-
-        /*
-        let joints_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Joints Buffer"),
-            size: MAX_INSTANCES * 64 * 4, 
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        */
+        });        
 
         let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Materials Buffer"),
@@ -143,7 +135,7 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        let total_visible_slots = 100 * 2; // 200 слотов под VisibleInstanceData
+        let total_visible_slots = instances_count * total_meshlets_commands_count; // 200 слотов под VisibleInstanceData
         let visible_buffer_size = (total_visible_slots * std::mem::size_of::<VisibleInstanceData>()) as wgpu::BufferAddress;
 
         let visible_instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -779,14 +771,14 @@ impl StaticBindlessResources {
         }
     }
 
-    pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {        
+    pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {                
         encoder.copy_buffer_to_buffer(
             &self.indirect_commands_template_buffer,
             0,
             &self.indirect_commands_buffer,
             0,
             self.indirect_commands_buffer.size(), 
-        );
+        );        
     }
 
     pub fn compute_gpu_driven_frame(
