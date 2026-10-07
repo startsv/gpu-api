@@ -24,7 +24,17 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
 };
+
+struct DrawIndexedIndirectCommand {
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: u32,
+    first_instance: u32,
+};
+
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
+@group(1) @binding(1) var<storage, read> indirect_commands: array<DrawIndexedIndirectCommand>;
 
 struct StaticVertex {    
     position: vec3<f32>,
@@ -110,25 +120,24 @@ struct FragmentInput {
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
-    @builtin(instance_index) draw_instance_idx: u32
+    @builtin(instance_index) draw_instance_idx: u32 // Магическим образом содержит глобальный ID мешлета!
 ) -> FragmentInput {    
     
-    // 1. Получаем данные о видимом инстансе и мешлете, сгенерированные в Compute-шейдере
+    // draw_instance_idx теперь напрямую является плотным индексом в visible_instances!
     let render_data = visible_instances[draw_instance_idx];
+    
     let instance = global_instances[render_data.instance_id];
     let meshlet = global_meshlets[render_data.meshlet_index];
     let mesh_info = global_mesh_infos[instance.primitive_index];
     
-    // 2. Вычисляем правильный индекс треугольника/вершины внутри мешлета.
-    // При рендере через draw_indexed_indirect с шаблоном, vertex_id идет от 0 до index_count мешлета.
+    // Вычисляем адрес локального индекса треугольника внутри мешлета
     let local_index_address = meshlet.index_offset + vertex_id;
     let local_vertex_id = meshlet_local_indices[local_index_address];
     
-    // 3. Достаем реальный ID вершины в мега-буфере геометрии через таблицу перенаправления (Vertex Redirect)
+    // Достаем реальный ID вершины в мега-буфере статики
     let redirect_address = meshlet.vertex_offset + local_vertex_id;
     let actual_vertex_id = meshlet_vertex_redirect[redirect_address];
     
-    // 4. Применяем базовое смещение вершин меша (если ваши мешлеты построены на локальных индексах меша)
     let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     

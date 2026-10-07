@@ -119,36 +119,36 @@ fn culling_main(
     
     let instance = global_instances[global_instance_id];
     
-    // ЭТАП 1: Куллинг на уровне объектов
+    // 1. Куллинг объекта целиком
     let world_object_aabb = transform_aabb(instance.aabb_min, instance.aabb_max, instance.model_matrix);
-    
     if (!is_aabb_visible(world_object_aabb[0], world_object_aabb[1])) {
-        return; // Объект целиком не виден, пропускаем все его мешлеты
+        return; 
     }
     
     let mesh_info = global_mesh_infos[instance.primitive_index];
             
-    // ЭТАП 2: Куллинг на уровне мешлетов внутри видимого объекта
+    // 2. Куллинг мешлетов объекта
     for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
         let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
         let meshlet = global_meshlets[global_meshlet_id];
         
         let world_meshlet_aabb = transform_aabb(meshlet.aabb_min, meshlet.aabb_max, instance.model_matrix);
         
+        let cmd_id = instance.base_command_id + m_idx; 
+        
         if (is_aabb_visible(world_meshlet_aabb[0], world_meshlet_aabb[1])) {
+            // Мешлет видим! Выставляем ровно 1 инстанс для данной команды
+            indirect_commands[cmd_id].instance_count = 1u;
             
-            // Динамический ID команды: базовая команда меша + локальный индекс видимого мешлета
-            let cmd_id = instance.base_command_id + m_idx; 
-                            
-            // Увеличиваем счетчик инстансов для конкретной indirect-команды мешлета
-            let local_slot = atomicAdd(&indirect_commands[cmd_id].instance_count, 1u);
-                            
-            let base_offset = indirect_commands[cmd_id].first_instance;
-            let write_index = base_offset + local_slot;
+            // Пишем строго в свой персональный зарезервированный индекс
+            let write_index = cmd_id; 
                                         
             visible_instances[write_index].instance_id = global_instance_id;
             visible_instances[write_index].material_index = instance.material_index;
-            visible_instances[write_index].meshlet_index = global_meshlet_id; // Передаем в рендер
+            visible_instances[write_index].meshlet_index = global_meshlet_id;
+        } else {
+            // Мешлет отсечен
+            indirect_commands[cmd_id].instance_count = 0u;
         }
     }
 }

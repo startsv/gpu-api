@@ -297,7 +297,21 @@ impl StaticBindlessResources {
                     min_binding_size: None,
                 },
                 count: None,
-            }
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                // Доступно и в Vertex для рендера, и в Compute для куллинга!
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE, 
+                ty: wgpu::BindingType::Buffer {
+                    // Обратите внимание: для графического конвейера нужен read_only: true, 
+                    // а для compute-пайплайна куллинга нужен read_only: false (так как он туда пишет).
+                    // В wgpu для рендера мы создаем отдельный bind_group с read_only лейаутом.
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
         label: Some("camera_bind_group_layout"),
     });
@@ -308,7 +322,11 @@ impl StaticBindlessResources {
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
-            }
+            },
+             wgpu::BindGroupEntry {
+            binding: 1,                
+                resource: indirect_commands_buffer.as_entire_binding(), 
+            },
         ],
         label: Some("camera_bind_group")
     });    

@@ -136,7 +136,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         base_vertex: 0,
     }];
 
-    // 3. Генерируем инстансы кубов и их персональные indirect-команды
+    // 3. Генерируем инстансы кубов и их персональные indirect-команды    
     let mut instances = Vec::new();
     let mut indirect_commands = Vec::new();
 
@@ -144,26 +144,27 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
         let model_matrix = Mat4::from_translation(position);
 
-        // У каждого инстанса `i` будет своя пара indirect-команд.
-        // Инстанс 0 займет команды 0 и 1, Инстанс 1 займет 2 и 3, и т.д.
+        // У каждого инстанса `i` ровно 2 последовательные команды в общем буфере
         let base_command_id = (i * 2) as u32;
 
-        // Команда для Мешлета 1 текущего куба
+        // Команда для Мешлета 1 этого конкретного куба
         indirect_commands.push(DrawIndexedIndirectCommand {
             index_count: 18,
             instance_count: 0, 
-            first_index: 0,     // Ссылается на начало dummy_indices_template
+            first_index: 0,     
             base_vertex: 0,
-            first_instance: base_command_id, // Уникальный слот в visible_instances
+            // Аппаратно сместит `@builtin(instance_index)` до значения base_command_id + 0
+            first_instance: base_command_id, 
         });
 
-        // Команда для Мешлета 2 текущего куба
+        // Команда для Мешлета 2 этого конкретного куба
         indirect_commands.push(DrawIndexedIndirectCommand {
             index_count: 18,
             instance_count: 0, 
-            first_index: 0,     // Ссылается на начало dummy_indices_template
+            first_index: 0,     
             base_vertex: 0,
-            first_instance: base_command_id + 1, // Уникальный слот в visible_instances
+            // Аппаратно сместит `@builtin(instance_index)` до значения base_command_id + 1
+            first_instance: base_command_id + 1, 
         });
 
         instances.push(InstanceData {
@@ -173,7 +174,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             joints_offset: 0,
             material_index: 0,
             primitive_index: 0, 
-            pad0: base_command_id,    // Передаем шейдеру стартовый ID его команд
+            pad0: base_command_id, // Передаем шейдеру куллинга, чтобы он знал куда писать
             pad1: 0, pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
             pad_aabb1: 0,
