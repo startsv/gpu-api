@@ -223,7 +223,7 @@ async fn run() {
         &mut init_data
     );
 
-    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 20, &init_data);
+    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, &init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -255,7 +255,7 @@ async fn run() {
    
     model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);
 
-    let static_test_scene = generate_static_test_data(10);
+    let static_test_scene = generate_static_test_data(100);
 
     static_bindless_resources.init(&queue, &static_test_scene.vertices, &static_test_scene.indices, &static_test_scene.meshlets, &static_test_scene.mesh_infos, &init_data.factors, &indirect_commands);
 

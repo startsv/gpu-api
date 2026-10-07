@@ -811,7 +811,7 @@ impl StaticBindlessResources {
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
-            commands.len() as u32
+            200u32
         );
     }
 }
