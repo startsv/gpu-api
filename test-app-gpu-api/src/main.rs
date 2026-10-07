@@ -86,7 +86,7 @@ async fn run() {
                 required_features:
                     wgpu::Features::TEXTURE_FORMAT_16BIT_NORM |
                     wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
-                    wgpu::Features::TEXTURE_BINDING_ARRAY,                    
+                    wgpu::Features::TEXTURE_BINDING_ARRAY,
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
@@ -844,7 +844,7 @@ async fn run() {
                             }
 
                             static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
-                            static_bindless_resources.clear_gpu_driven_frame(&mut encoder);
+                            //static_bindless_resources.clear_gpu_driven_frame(&mut encoder);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

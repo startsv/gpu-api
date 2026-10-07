@@ -70,9 +70,6 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 7
     ];
 
-    // Генерируем шаблон-пустышку индексов (просто линейный массив от 0 до максимального index_count мешлета, т.е. 18)
-    let dummy_indices_template: Vec<u32> = (0..18).collect();
-
     // 2. Строим таблицы перенаправления и локальных индексов для мешлетов куба
     // Мешлет 1 (содержит вершины 0, 1, 2, 3, 5, 6 для первых 3 граней)
     let meshlet1_redirect = vec![0, 1, 2, 3, 5, 6]; 
@@ -137,6 +134,8 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
     }];
 
     // 3. Генерируем инстансы кубов и их персональные indirect-команды    
+    let dummy_indices_template: Vec<u32> = (0..18).collect();
+
     let mut instances = Vec::new();
     let mut indirect_commands = Vec::new();
 
@@ -144,27 +143,25 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
         let model_matrix = Mat4::from_translation(position);
 
-        // У каждого инстанса `i` ровно 2 последовательные команды в общем буфере
         let base_command_id = (i * 2) as u32;
 
-        // Команда для Мешлета 1 этого конкретного куба
+        // Команда для Мешлета 1 этого куба
         indirect_commands.push(DrawIndexedIndirectCommand {
             index_count: 18,
             instance_count: 0, 
-            first_index: 0,     
-            base_vertex: 0,
-            // Аппаратно сместит `@builtin(instance_index)` до значения base_command_id + 0
-            first_instance: base_command_id, 
+            first_index: 0, // СТРОГО 0
+            base_vertex: (base_command_id << 16) as i32, // Запекаем ID в старшие 16 бит
+            first_instance: 0, 
         });
 
-        // Команда для Мешлета 2 этого конкретного куба
+        // Команда для Мешлета 2 этого куба
         indirect_commands.push(DrawIndexedIndirectCommand {
             index_count: 18,
             instance_count: 0, 
-            first_index: 0,     
-            base_vertex: 0,
-            // Аппаратно сместит `@builtin(instance_index)` до значения base_command_id + 1
-            first_instance: base_command_id + 1, 
+            first_index: 0, // СТРОГО 0
+            base_vertex: ((base_command_id + 1) << 16) as i32, // Запекаем ID в старшие 16 бит
+
+            first_instance: 0, 
         });
 
         instances.push(InstanceData {
@@ -174,7 +171,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             joints_offset: 0,
             material_index: 0,
             primitive_index: 0, 
-            pad0: base_command_id, // Передаем шейдеру куллинга, чтобы он знал куда писать
+            pad0: base_command_id, 
             pad1: 0, pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
             pad_aabb1: 0,

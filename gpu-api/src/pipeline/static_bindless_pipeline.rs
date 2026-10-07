@@ -140,7 +140,7 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        let total_visible_slots = instances_count * total_meshlets_commands_count; // 200 слотов под VisibleInstanceData
+        let total_visible_slots =  total_meshlets_commands_count;
         let visible_buffer_size = (total_visible_slots * std::mem::size_of::<VisibleInstanceData>()) as wgpu::BufferAddress;
 
         let visible_instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -914,10 +914,21 @@ impl StaticBindlessResources {
         
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
         
+        /*
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
             self.total_meshlets_commands_count
         );
+        */
+        info!("Drawing, total commands: {}", self.total_meshlets_commands_count);
+        for i in 0..self.total_meshlets_commands_count {
+            let offset = i as wgpu::BufferAddress * size_of::<DrawIndexedIndirectCommand>() as u64;
+            
+            render_pass.draw_indexed_indirect(
+                &self.indirect_commands_buffer, 
+                offset
+            );
+        }
     }
 }

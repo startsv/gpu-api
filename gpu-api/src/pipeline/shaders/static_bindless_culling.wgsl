@@ -118,37 +118,21 @@ fn culling_main(
     if (global_id.x >= task.object_count) { return; }
     
     let instance = global_instances[global_instance_id];
-    
-    // 1. Куллинг объекта целиком
-    let world_object_aabb = transform_aabb(instance.aabb_min, instance.aabb_max, instance.model_matrix);
-    if (!is_aabb_visible(world_object_aabb[0], world_object_aabb[1])) {
-        return; 
-    }
-    
     let mesh_info = global_mesh_infos[instance.primitive_index];
             
-    // 2. Куллинг мешлетов объекта
+    // ПОЛНОСТЬЮ ОТКЛЮЧАЕМ ТЕСТ ВИДИМОСТИ AABB. ВСЕ ОБЪЕКТЫ СЧИТАЮТСЯ ВИДИМЫМИ.
     for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
         let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
-        let meshlet = global_meshlets[global_meshlet_id];
-        
-        let world_meshlet_aabb = transform_aabb(meshlet.aabb_min, meshlet.aabb_max, instance.model_matrix);
         
         let cmd_id = instance.base_command_id + m_idx; 
         
-        if (is_aabb_visible(world_meshlet_aabb[0], world_meshlet_aabb[1])) {
-            // Мешлет видим! Выставляем ровно 1 инстанс для данной команды
-            indirect_commands[cmd_id].instance_count = 1u;
-            
-            // Пишем строго в свой персональный зарезервированный индекс
-            let write_index = cmd_id; 
-                                        
-            visible_instances[write_index].instance_id = global_instance_id;
-            visible_instances[write_index].material_index = instance.material_index;
-            visible_instances[write_index].meshlet_index = global_meshlet_id;
-        } else {
-            // Мешлет отсечен
-            indirect_commands[cmd_id].instance_count = 0u;
-        }
+        // Хардкорно пишем "видимый" для абсолютно всех команд
+        indirect_commands[cmd_id].instance_count = 1u;
+        
+        let write_index = cmd_id; 
+                                    
+        visible_instances[write_index].instance_id = global_instance_id;
+        visible_instances[write_index].material_index = instance.material_index;
+        visible_instances[write_index].meshlet_index = global_meshlet_id;
     }
 }

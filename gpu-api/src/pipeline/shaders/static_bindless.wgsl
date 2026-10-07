@@ -119,12 +119,17 @@ struct FragmentInput {
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) vertex_id: u32,
-    @builtin(instance_index) draw_instance_idx: u32 // Магическим образом содержит глобальный ID мешлета!
+    @builtin(vertex_index) hardware_vertex_id: u32,
+    @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
+    // Извлекаем ID команды из старших 16 бит (сдвиг вправо)
+    let cmd_id = hardware_vertex_id >> 16u;
     
-    // draw_instance_idx теперь напрямую является плотным индексом в visible_instances!
-    let render_data = visible_instances[draw_instance_idx];
+    // Извлекаем чистый локальный индекс вершины (остаток в младших 16 битах)
+    let vertex_id = hardware_vertex_id & 0xFFFFu;
+    
+    // Теперь cmd_id ЖЕСТКО уникален для каждого мешлета и равен 0, 1, 2... 199!
+    let render_data = visible_instances[cmd_id];
     
     let instance = global_instances[render_data.instance_id];
     let meshlet = global_meshlets[render_data.meshlet_index];
@@ -141,22 +146,18 @@ fn vs_main(
     let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     
-    // Восстановление полей вершины
-    let raw_pos = vertex.position;
-    let raw_uv = vertex.uv;
-    let raw_normal = vertex.normal;
-
+    // Вся остальная математика трансформаций (model_matrix и т.д.) остается прежней...
     let model_matrix = instance.model_matrix;
-    let model_position = model_matrix * vec4<f32>(raw_pos, 1.0);
+    let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     
     var out: FragmentInput;
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
-    out.uv = raw_uv;
-    out.material_index = render_data.material_index; 
-        
+    out.uv = vertex.uv;
+    out.material_index = instance.material_index; 
+    
     let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
-    out.normal = normalize(normal_matrix * raw_normal);
+    out.normal = normalize(normal_matrix * vertex.normal);
     out.tangent = normalize(normal_matrix * vertex.tangent);
     out.bitangent = normalize(normal_matrix * vertex.bitangent);
     
