@@ -907,28 +907,16 @@ impl StaticBindlessResources {
         render_pass: &mut wgpu::RenderPass,
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
-        // Привязываем Render-версию группы (где этот же буфер строго read_only)
+        render_pass.set_bind_group(0, &self.materials_bind_group, &[]);        
         render_pass.set_bind_group(1, &self.render_camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.render_bind_group, &[]); 
         
-        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
-        
-        /*
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
             self.total_meshlets_commands_count
         );
-        */
-        info!("Drawing, total commands: {}", self.total_meshlets_commands_count);
-        for i in 0..self.total_meshlets_commands_count {
-            let offset = i as wgpu::BufferAddress * size_of::<DrawIndexedIndirectCommand>() as u64;
-            
-            render_pass.draw_indexed_indirect(
-                &self.indirect_commands_buffer, 
-                offset
-            );
-        }
     }
 }
