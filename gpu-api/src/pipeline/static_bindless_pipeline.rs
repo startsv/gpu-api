@@ -89,7 +89,7 @@ impl StaticBindlessResources {
         queue: &wgpu::Queue,        
         camera_uniform: &CameraUniform,
         depth_stencil: Option<wgpu::DepthStencilState>,
-        primitives_count: usize,        
+        total_meshlets_commands_count: usize,        
         init_data: &InitData,
     ) -> Self {                        
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -143,12 +143,16 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
+        let total_visible_slots = 100 * 2; // 200 слотов под VisibleInstanceData
+        let visible_buffer_size = (total_visible_slots * std::mem::size_of::<VisibleInstanceData>()) as wgpu::BufferAddress;
+
         let visible_instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Visible Instances Buffer"),            
-            size: MAX_INSTANCES * (size_of::<VisibleInstanceData>() as u64),
+            label: Some("Static Visible Instances Buffer"),
+            size: visible_buffer_size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });            
+        });
+
 
         // 2. Создаем буфер метаданных мешей (MeshInfo)
         let mesh_infos_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -166,16 +170,20 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
+        let indirect_buffer_size = (total_meshlets_commands_count * std::mem::size_of::<DrawIndexedIndirectCommand>()) as u64;
+
+        // 1. Создаем буфер-шаблон строго нужного размера (40 байт)
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Indirect Commands Buffer"),
-            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            label: Some("Static Indirect Commands Template Buffer"),
+            size: indirect_buffer_size, 
             usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
+        // 2. Создаем рабочий буфер строго нужного размера (40 байт)
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Indirect Commands Buffer"),
-            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            label: Some("Static Indirect Commands Buffer"),
+            size: indirect_buffer_size, 
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -798,20 +806,20 @@ impl StaticBindlessResources {
     pub fn draw_gpu_driven_frame(
         &self,
         render_pass: &mut wgpu::RenderPass,
-        commands: &[DrawIndexedIndirectCommand]
+        commands: &[DrawIndexedIndirectCommand] // Этот массив на CPU должен содержать ровно 2 элемента
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.render_bind_group, &[]); // Включает в себя вершины, ноды, инстансы и видимость
+        render_pass.set_bind_group(2, &self.render_bind_group, &[]); 
         
-        // Индексный буфер по-прежнему обязателен для работы draw_indexed_indirect!
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
         
+        // ИСПРАВЛЕНИЕ: Передаем строго 2 (или commands.len() as u32), так как у нас всего 2 мешлет-команды!
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
-            200u32
+            2u32 // Либо commands.len() as u32
         );
     }
 }
