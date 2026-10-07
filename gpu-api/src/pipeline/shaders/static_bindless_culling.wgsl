@@ -90,11 +90,9 @@ fn culling_main(
     @builtin(local_invocation_id) local_id: vec3<u32>
 ) {
     let task_index = workgroup_id.x;
-    let total_tasks = arrayLength(&culling_tasks);
-    if (task_index >= total_tasks) { return; }
+    if (task_index >= arrayLength(&culling_tasks)) { return; }
     
     let task = culling_tasks[task_index];
-    let chunk_lod = task.lod_level;
         
     for (var i = local_id.x; i < task.object_count; i = i + 64u) {
         let global_instance_id = task.start_object_index + i;
@@ -102,72 +100,34 @@ fn culling_main(
         let mesh_info = global_mesh_infos[instance.primitive_index];
                 
         let m = instance.model_matrix;
-                
-        let obj_center = (instance.aabb_min.xyz + instance.aabb_max.xyz) * 0.5;
-        let obj_extents = (instance.aabb_max.xyz - instance.aabb_min.xyz) * 0.5;
-        let obj_world_center = (m * vec4<f32>(obj_center, 1.0)).xyz;
-                     
-        // Извлечение строк из Column-Major матрицы с сохранением знаков для OBB теста                   
-        let row0 = vec3<f32>(abs(m[0].x), abs(m[1].x), abs(m[2].x));
-        let row1 = vec3<f32>(abs(m[0].y), abs(m[1].y), abs(m[2].y));
-        let row2 = vec3<f32>(abs(m[0].z), abs(m[1].z), abs(m[2].z));
-                
-        let obj_world_extents = vec3<f32>(
-            dot(row0, obj_extents),
-            dot(row1, obj_extents),
-            dot(row2, obj_extents)
-        );
         
-        // --- Этап 1: Грубый куллинг всего объекта ---
-        if (!is_aabb_visible(obj_world_center - obj_world_extents, obj_world_center + obj_world_extents)) {
-            //continue;
-        }
-        
-        // --- Этап 2: По-мешлетный ювелирный куллинг ---
         for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
             let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
             let meshlet = global_meshlets[global_meshlet_id];
             
-            let meshlet_center = (meshlet.aabb_min + meshlet.aabb_max) * 0.5;
-            let meshlet_extents = (meshlet.aabb_max - meshlet.aabb_min) * 0.5;
-            
-            let world_meshlet_center = (m * vec4<f32>(meshlet_center, 1.0)).xyz;
-            
-            let world_meshlet_extents = vec3<f32>(
-                dot(row0, meshlet_extents),
-                dot(row1, meshlet_extents),
-                dot(row2, meshlet_extents)
-            );
-
-            let meshlet_world_min = world_meshlet_center - world_meshlet_extents;
-            let meshlet_world_max = world_meshlet_center + world_meshlet_extents;
-            
-            // ВНИМАНИЕ: Для отладки куллинга вы можете временно заменить условие на `if (true)`
-            if (true) {
-            //if (is_aabb_visible(meshlet_world_min, meshlet_world_max)) {
-                let cmd_id = instance.base_command_id + m_idx; // Теперь берем из выделенного поля
+            // ВРЕМЕННО ХАРДКОДИМ ИСТИНУ, ЧТОБЫ УВИДЕТЬ ВСЕ КУБЫ
+            if (true) {                                
+                let cmd_id = instance.base_command_id + m_idx;
                                 
-                // Перезаписываем параметры геометрии конкретного мешлета
                 indirect_commands[cmd_id].index_count = meshlet.index_count;
                 indirect_commands[cmd_id].first_index = meshlet.index_offset;
+                indirect_commands[cmd_id].base_vertex = 0; // Строго 0 для Vertex Pulling!
                 
-                // ВАЖНО ДЛЯ VERTEX PULLING: Обнуляем аппаратный base_vertex.
-                // Смещение меша `mesh_info.vertex_buffer_offset` мы применим вручную во Vertex Shader.
-                indirect_commands[cmd_id].base_vertex = 0;
-                
-                // Атомарно занимаем инстанс-слот для данного мешлета
-                let local_slot = atomicAdd(&indirect_commands[cmd_id].instance_count, 1u);
+                // Выставляем instance_count в 1, чтобы GPU нарисовал этот мешлет
+                indirect_commands[cmd_id].instance_count = 1u;
                                 
-                // Читаем базовое смещение в глобальном буфере видимости visible_instances.
-                // Оно настраивается на CPU в `generate_static_test_data` индивидуально для каждой команды.
-                let base_offset = indirect_commands[cmd_id].first_instance;
-                let write_index = base_offset + local_slot;
+                // ПРЯМАЯ ЗАПИСЬ: Записываем ID инстанса прямо в слот, равный cmd_id
+                let write_index = cmd_id;
                                             
-                // Записываем данные для рендеринга
                 visible_instances[write_index].instance_id = global_instance_id;
                 visible_instances[write_index].material_index = instance.material_index;
+            } else {
+                // Если мешлет не прошел куллинг (в будущем)
+                let cmd_id = instance.base_command_id + m_idx;
+                indirect_commands[cmd_id].instance_count = 0u;
             }
         }
     }
 }
+
 

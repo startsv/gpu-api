@@ -124,14 +124,17 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
         let model_matrix = Mat4::from_translation(position);
 
+        let base_cmd_id = i * 2; // Уникальный ID первой команды для куба i
+
+
         instances.push(InstanceData {
             model_matrix: model_matrix.to_cols_array_2d(),
             is_animated: 0,
             node_index: 0, // Предполагаем корневую ноду без дополнительных сдвигов
             joints_offset: 0,
             material_index: 0, // Используем первый материал из global_materials
-            primitive_index: i * 2, // Указывает на базовую indirect-команду для этого инстанса
-            pad0: 0, pad1: 0, pad2: 0,
+            primitive_index: 0, // Указывает на базовую indirect-команду для этого инстанса
+            pad0: base_cmd_id, pad1: 0, pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
             pad_aabb1: 0,
             aabb_max: [0.5, 0.5, 0.5],
@@ -140,6 +143,8 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
 
         // Создаем Draw-команды шаблона для КАЖДОГО мешлета этого инстанса
         for m_idx in 0..2 {
+            let current_cmd_id = base_cmd_id + m_idx;
+
             indirect_commands.push(DrawIndexedIndirectCommand {
                 index_count: 18, // Будет перезаписано шейдером, но заполняем для надежности
                 instance_count: 0, // Изначально 0, шейдер увеличит атомиком, если мешлет видим
@@ -147,7 +152,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
                 base_vertex: 0,
                 // Критически важно: указываем уникальный диапазон в visible_instances для этого мешлета
                 // Каждый мешлет может отрендерить максимум 1 инстанс в своей команде.
-                first_instance: current_visible_instances_offset,
+                first_instance: current_cmd_id,
             });
             current_visible_instances_offset += 1;
         }

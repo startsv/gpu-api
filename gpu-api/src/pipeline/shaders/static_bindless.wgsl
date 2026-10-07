@@ -27,15 +27,15 @@ struct CameraUniform {
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
 
 struct StaticVertex {    
-    position: array<f32, 3>,
+    position: vec3<f32>,
     pad0: f32,                // Дополняем до vec4 (16 байт)
-    uv: array<f32, 2>,
-    pad1: array<f32, 2>,      // Дополняем до vec4 (16 байт)
-    normal: array<f32, 3>,
+    uv: vec2<f32>,
+    pad1: vec2<f32>,      // Дополняем до vec4 (16 байт)
+    normal: vec3<f32>,
     pad2: f32,                // Дополняем до vec4 (16 байт)
-    tangent: array<f32, 3>,
+    tangent: vec3<f32>,
     pad3: f32,                // Дополняем до vec4 (16 байт)
-    bitangent: array<f32, 3>,
+    bitangent: vec3<f32>,
     pad4: f32,                // Дополняем до vec4 (16 байт)
 };
 
@@ -95,35 +95,36 @@ fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    let vertex = static_vertices[vertex_id];
+    // draw_instance_idx теперь напрямую указывает на ID команды/мешлета на сцене!
+    let render_data = visible_instances[draw_instance_idx];
+    let instance = global_instances[render_data.instance_id];
+    let mesh_info = global_mesh_infos[instance.primitive_index];
     
-    // Распаковываем массивы в нормальные вектора WGSL
-    let raw_pos = vec3<f32>(vertex.position[0], vertex.position[1], vertex.position[2]);
-    let raw_uv = vec2<f32>(vertex.uv[0], vertex.uv[1]);
+    // Ручной сдвиг вершины в мега-буфере статики
+    let global_vertex_idx = vertex_id + mesh_info.vertex_buffer_offset;
+    let vertex = static_vertices[global_vertex_idx];
+    
+    // Восстановление Std430 vec3 полей из массивов
+    let raw_pos = vertex.position;
+    let raw_uv = vertex.uv;
+    let raw_normal = vertex.normal;
 
-    // Тестовая матрица (Куб перед камерой)
-    let hardcoded_model_matrix = mat4x4<f32>(
-        vec4<f32>(1.0, 0.0, 0.0, 0.0),
-        vec4<f32>(0.0, 1.0, 0.0, 0.0),
-        vec4<f32>(0.0, 0.0, 1.0, 0.0),
-        vec4<f32>(0.0, 0.0, -5.0, 1.0) 
-    );
-    
-    let model_position = hardcoded_model_matrix * vec4<f32>(raw_pos, 1.0);
+    let model_matrix = instance.model_matrix;
+    let model_position = model_matrix * vec4<f32>(raw_pos, 1.0);
     
     var out: FragmentInput;
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
     out.uv = raw_uv;
-    out.material_index = 0u;
-    
-    out.normal = vec3<f32>(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
-    out.tangent = vec3<f32>(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
-    out.bitangent = vec3<f32>(vertex.bitangent[0], vertex.bitangent[1], vertex.bitangent[2]);
+    out.material_index = render_data.material_index; 
+        
+    let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
+    out.normal = normalize(normal_matrix * raw_normal);
+    out.tangent = normalize(normal_matrix * vertex.tangent);
+    out.bitangent = normalize(normal_matrix * vertex.bitangent);
     
     return out;    
 }
-
 
 @fragment
 fn fs_main(in: FragmentInput) -> @location(0) vec4<f32> {    
