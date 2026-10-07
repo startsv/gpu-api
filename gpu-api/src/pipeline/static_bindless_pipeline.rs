@@ -81,7 +81,8 @@ pub struct StaticBindlessResources {
     // Пайплайны и бинд-группы
     pub culling_compute_pipeline: wgpu::ComputePipeline,
     pub render_pipeline: wgpu::RenderPipeline,
-    pub camera_bind_group: wgpu::BindGroup,
+    pub culling_camera_bind_group: wgpu::BindGroup,
+    pub render_camera_bind_group: wgpu::BindGroup,
     pub culling_compute_bind_group: wgpu::BindGroup,
     pub materials_bind_group: wgpu::BindGroup,
     pub render_bind_group: wgpu::BindGroup,
@@ -277,7 +278,6 @@ impl StaticBindlessResources {
         ],
     });
 
-
     let camera_buffer = device.create_buffer_init(
         &wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -286,11 +286,14 @@ impl StaticBindlessResources {
         }
     );
 
-    let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    // 1. Создаем LEAYOUT для Compute
+    let culling_camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Culling Camera & Indirect Layout (Group 0 for Compute)"),
         entries: &[
+            // @binding(0): Camera Uniform
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -298,44 +301,74 @@ impl StaticBindlessResources {
                 },
                 count: None,
             },
+            // @binding(1): Indirect Commands Buffer (НА ЗАПИСЬ)
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                // Доступно и в Vertex для рендера, и в Compute для куллинга!
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE, 
+                visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    // Обратите внимание: для графического конвейера нужен read_only: true, 
-                    // а для compute-пайплайна куллинга нужен read_only: false (так как он туда пишет).
-                    // В wgpu для рендера мы создаем отдельный bind_group с read_only лейаутом.
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty: wgpu::BufferBindingType::Storage { read_only: false }, // <--- ВАЖНО: false
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
                 count: None,
             },
         ],
-        label: Some("camera_bind_group_layout"),
     });
 
-    let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &camera_bind_group_layout,
+    // 2. Создаем саму BIND GROUP для Compute
+    let culling_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Culling Camera & Indirect Bind Group"),
+        layout: &culling_camera_layout,
         entries: &[
-            wgpu::BindGroupEntry {
+            wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: indirect_commands_buffer.as_entire_binding() },
+        ],
+    });
+
+    // 1. Создаем LEAYOUT для Render
+    let render_camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Render Camera & Indirect Layout (Group 1 for Render)"),
+        entries: &[
+            // @binding(0): Camera Uniform
+            wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                resource: camera_buffer.as_entire_binding(),
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-             wgpu::BindGroupEntry {
-            binding: 1,                
-                resource: indirect_commands_buffer.as_entire_binding(), 
+            // @binding(1): Indirect Commands Buffer (НА ЧТЕНИЕ)
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true }, // <--- ВАЖНО: true
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
         ],
-        label: Some("camera_bind_group")
-    });    
+    });
+
+    // 2. Создаем саму BIND GROUP для Render
+    let render_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Render Camera & Indirect Bind Group"),
+        layout: &render_camera_layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: indirect_commands_buffer.as_entire_binding() },
+        ],
+    });   
         
     // Camera (Group 1), Instances/Nodes/Task data/Visible Indices/Indirect Commands (Group 2)
     let culling_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Culling Pipeline Layout"),
         bind_group_layouts: &[
-            Some(&camera_bind_group_layout),
+            Some(&culling_camera_layout),
             Some(&culling_compute_bind_group_layout),
         ],            
         immediate_size: 0,
@@ -536,7 +569,7 @@ impl StaticBindlessResources {
             label: Some("Static Bindless Render Pipeline Layout"),
             bind_group_layouts: &[
                 Some(&materials_bind_group_layout), // @group(0)
-                Some(&camera_bind_group_layout),    // @group(1)
+                Some(&render_camera_layout),    // @group(1)
                 Some(&render_bind_group_layout), // @group(2)
             ],
             immediate_size: 0,
@@ -777,7 +810,8 @@ impl StaticBindlessResources {
             culling_compute_pipeline,
             render_pipeline,
             materials_bind_group,
-            camera_bind_group,
+            culling_camera_bind_group,
+            render_camera_bind_group,
             culling_compute_bind_group,
             render_bind_group,
         }        
@@ -860,11 +894,10 @@ impl StaticBindlessResources {
         total_instances_count: u32, 
     ) {        
         compute_pass.set_pipeline(&self.culling_compute_pipeline);
-        compute_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        // Привязываем Compute-версию группы (с правами на запись в буфер команд)
+        compute_pass.set_bind_group(0, &self.culling_camera_bind_group, &[]);
         compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]);
         
-        // Распределяем рабочие группы Compute-шейдера по количеству объектов (кубов) на сцене.
-        // Шейдер сам внутри переберет мешлеты каждого видимого объекта линейно.
         let workgroup_count = (total_instances_count + 63) / 64;
         compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
@@ -875,15 +908,12 @@ impl StaticBindlessResources {
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+        // Привязываем Render-версию группы (где этот же буфер строго read_only)
+        render_pass.set_bind_group(1, &self.render_camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.render_bind_group, &[]); 
         
-        // В качестве индексного буфера передается шаблон последовательных индексов (0, 1, 2... 384)
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
         
-        // ИСПРАВЛЕНИЕ: Мы убрали аргумент `commands` с CPU.
-        // Теперь мы вызываем отрисовку для ВСЕХ существующих мешлет-команд в сцене (self.total_commands_count).
-        // Железо выполнит их все, но мгновенно пропустит те, у которых Compute-шейдер куллинга оставил instance_count = 0.
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
