@@ -588,9 +588,10 @@ async fn run() {
                             }
 
                             camera.update(layout.size.width as f32, layout.size.height as f32);
-            
+                            let camera_uniform = camera.get_uniform();
+
                             {                                                                                            
-                                let camera_uniform = camera.get_uniform();
+                                
 
                                 let mut model_camera_slice = staging_belt.write_buffer(
                                     &mut encoder,
@@ -822,7 +823,7 @@ async fn run() {
                                 }
                             }
                                                         
-                            surface_resources.load_frame(&queue, &mut encoder, &camera, &mut staging_belt, &surface_culling_tasks);
+                            surface_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &surface_culling_tasks);
                             surface_resources.clear_gpu_driven_frame(&mut encoder);
                             
                             {
@@ -853,7 +854,7 @@ async fn run() {
                                 static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, &model_culling_tasks);
                             }
 
-                            model_bindless_resources.load_frame(&queue, &mut encoder, &camera, &mut staging_belt, &global_instances, &init_data.nodes,
+                            model_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &global_instances, &init_data.nodes,
                                 //&init_data.joints,
                                 &model_culling_tasks);
                             model_bindless_resources.clear_gpu_driven_frame(&mut encoder);

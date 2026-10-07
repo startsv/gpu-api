@@ -613,19 +613,18 @@ impl SurfaceBindlessResources {
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        camera: &Camera,
+        camera_uniform: &CameraUniform,
         staging_belt: &mut StagingBelt,
         culling_tasks: &[SurfaceCullingTask],        
     ) {        
         {                                                                                            
-            let camera_uniform = camera.get_uniform();
             let mut camera_slice = staging_belt.write_buffer(
                 encoder,
                 &self.camera_buffer,
                 0,
                 wgpu::BufferSize::new(CAMERA_UNIFORM_SIZE).expect("Failed to allocate bindless camera slice")
             );            
-            camera_slice.copy_from_slice(bytemuck::bytes_of(&camera_uniform));
+            camera_slice.copy_from_slice(bytemuck::bytes_of(camera_uniform));
         }
 
         if !culling_tasks.is_empty() {

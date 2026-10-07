@@ -27,17 +27,18 @@ struct CameraUniform {
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
 
 struct StaticVertex {    
-    position: vec3<f32>,
-    pad0: f32,            // Выравниваем position до vec4!
-    uv: vec2<f32>,
-    pad1: vec2<f32>,      // Выравниваем uv до vec4!
-    normal: vec3<f32>,
-    pad2: f32,            // Выравниваем normal до vec4!
-    tangent: vec3<f32>,
-    pad3: f32,            // Выравниваем tangent до vec4!
-    bitangent: vec3<f32>,
-    pad4: f32,            // Выравниваем bitangent до vec4!
+    position: array<f32, 3>,
+    pad0: f32,                // Дополняем до vec4 (16 байт)
+    uv: array<f32, 2>,
+    pad1: array<f32, 2>,      // Дополняем до vec4 (16 байт)
+    normal: array<f32, 3>,
+    pad2: f32,                // Дополняем до vec4 (16 байт)
+    tangent: array<f32, 3>,
+    pad3: f32,                // Дополняем до vec4 (16 байт)
+    bitangent: array<f32, 3>,
+    pad4: f32,                // Дополняем до vec4 (16 байт)
 };
+
 
 
 struct NodeData {
@@ -94,37 +95,35 @@ fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    // 1. Читаем из буфера атомиков куллинга
-    let render_data = visible_instances[draw_instance_idx];
+    let vertex = static_vertices[vertex_id];
     
-    // 2. Получаем инстанс
-    let instance = global_instances[render_data.instance_id];
+    // Распаковываем массивы в нормальные вектора WGSL
+    let raw_pos = vec3<f32>(vertex.position[0], vertex.position[1], vertex.position[2]);
+    let raw_uv = vec2<f32>(vertex.uv[0], vertex.uv[1]);
+
+    // Тестовая матрица (Куб перед камерой)
+    let hardcoded_model_matrix = mat4x4<f32>(
+        vec4<f32>(1.0, 0.0, 0.0, 0.0),
+        vec4<f32>(0.0, 1.0, 0.0, 0.0),
+        vec4<f32>(0.0, 0.0, 1.0, 0.0),
+        vec4<f32>(0.0, 0.0, -5.0, 1.0) 
+    );
     
-    // 3. Достаем ноду и метаданные меша
-    let node = global_nodes[instance.node_index];
-    let mesh_info = global_mesh_infos[instance.primitive_index]; // Используем primitive_index как ID меша
-    
-    // 4. Вычисляем глобальный индекс вершины (учитывая ручной Vertex Pulling сдвиг)
-    let global_vertex_idx = vertex_id + mesh_info.vertex_buffer_offset;
-    let vertex = static_vertices[global_vertex_idx];
-    
-    // 5. Трансформация позиций
-    let model_matrix = instance.model_matrix * node.transform;
-    let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
+    let model_position = hardcoded_model_matrix * vec4<f32>(raw_pos, 1.0);
     
     var out: FragmentInput;
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
-    out.uv = vertex.uv;
-    out.material_index = render_data.material_index; 
-        
-    let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
-    out.normal = normalize(normal_matrix * vertex.normal);
-    out.tangent = normalize(normal_matrix * vertex.tangent);
-    out.bitangent = normalize(normal_matrix * vertex.bitangent);
+    out.uv = raw_uv;
+    out.material_index = 0u;
+    
+    out.normal = vec3<f32>(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+    out.tangent = vec3<f32>(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
+    out.bitangent = vec3<f32>(vertex.bitangent[0], vertex.bitangent[1], vertex.bitangent[2]);
     
     return out;    
 }
+
 
 @fragment
 fn fs_main(in: FragmentInput) -> @location(0) vec4<f32> {    
