@@ -28,18 +28,16 @@ struct CameraUniform {
 
 struct StaticVertex {    
     position: vec3<f32>,
-    pad0: f32,                // Дополняем до vec4 (16 байт)
+    pad0: f32,
     uv: vec2<f32>,
-    pad1: vec2<f32>,      // Дополняем до vec4 (16 байт)
+    pad1: vec2<f32>,
     normal: vec3<f32>,
-    pad2: f32,                // Дополняем до vec4 (16 байт)
+    pad2: f32,
     tangent: vec3<f32>,
-    pad3: f32,                // Дополняем до vec4 (16 байт)
+    pad3: f32,
     bitangent: vec3<f32>,
-    pad4: f32,                // Дополняем до vec4 (16 байт)
+    pad4: f32,
 };
-
-
 
 struct NodeData {
     info: vec4<u32>,
@@ -59,8 +57,8 @@ struct InstanceData {
     node_index: u32,
     joints_offset: u32,
     material_index: u32,
-    primitive_index: u32, // Будем использовать как mesh_info_index (всегда 0 для куба)
-    base_command_id: u32, // Переименовали pad0! Сюда запишем i * 2 для indirect-команд
+    primitive_index: u32, 
+    base_command_id: u32, 
     pad1: u32,
     pad2: u32,
     aabb_min: vec3<f32>,
@@ -69,9 +67,21 @@ struct InstanceData {
     pad_aabb2: u32,
 };
 
+struct StaticMeshletDescription {
+    aabb_min: vec3<f32>,
+    vertex_offset: u32,  // Смещение в глобальном Meshlet Vertex Buffer
+    aabb_max: vec3<f32>,
+    index_offset: u32,   // Смещение в глобальном Meshlet Index Buffer
+    index_count: u32,    // Количество индексов (треугольников * 3)
+    material_index: u32,
+    pad0: u32,
+    pad1: u32,
+};
+
 struct VisibleInstanceData {
     instance_id: u32,
     material_index: u32,
+    meshlet_index: u32, // Сюда compute-шейдер записал global_meshlet_id
 };
 
 @group(2) @binding(0) var<storage, read> static_vertices: array<StaticVertex>;
@@ -79,6 +89,13 @@ struct VisibleInstanceData {
 @group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 @group(2) @binding(3) var<storage, read> global_mesh_infos: array<MeshInfo>;
 @group(2) @binding(4) var<storage, read> visible_instances: array<VisibleInstanceData>;
+
+// НОВЫЕ БИНДИНГИ ДЛЯ МЕШЛЕТОВ:
+@group(2) @binding(5) var<storage, read> global_meshlets: array<StaticMeshletDescription>;
+// Локальные индексы мешлетов (обычно упакованные u32 или u8, здесь предполагаем плоский массив u32)
+@group(2) @binding(6) var<storage, read> meshlet_local_indices: array<u32>;
+// Глобальный перенаправленный вершинный буфер мешлетов (содержит реальные индексы вершин в static_vertices)
+@group(2) @binding(7) var<storage, read> meshlet_vertex_redirect: array<u32>;
 
 struct FragmentInput {
     @builtin(position) clip_position: vec4<f32>,
@@ -95,16 +112,27 @@ fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    // draw_instance_idx теперь напрямую указывает на ID команды/мешлета на сцене!
+    
+    // 1. Получаем данные о видимом инстансе и мешлете, сгенерированные в Compute-шейдере
     let render_data = visible_instances[draw_instance_idx];
     let instance = global_instances[render_data.instance_id];
+    let meshlet = global_meshlets[render_data.meshlet_index];
     let mesh_info = global_mesh_infos[instance.primitive_index];
     
-    // Ручной сдвиг вершины в мега-буфере статики
-    let global_vertex_idx = vertex_id + mesh_info.vertex_buffer_offset;
+    // 2. Вычисляем правильный индекс треугольника/вершины внутри мешлета.
+    // При рендере через draw_indexed_indirect с шаблоном, vertex_id идет от 0 до index_count мешлета.
+    let local_index_address = meshlet.index_offset + vertex_id;
+    let local_vertex_id = meshlet_local_indices[local_index_address];
+    
+    // 3. Достаем реальный ID вершины в мега-буфере геометрии через таблицу перенаправления (Vertex Redirect)
+    let redirect_address = meshlet.vertex_offset + local_vertex_id;
+    let actual_vertex_id = meshlet_vertex_redirect[redirect_address];
+    
+    // 4. Применяем базовое смещение вершин меша (если ваши мешлеты построены на локальных индексах меша)
+    let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     
-    // Восстановление Std430 vec3 полей из массивов
+    // Восстановление полей вершины
     let raw_pos = vertex.position;
     let raw_uv = vertex.uv;
     let raw_normal = vertex.normal;

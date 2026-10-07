@@ -7,6 +7,8 @@ pub struct TestSceneData {
     pub indices: Vec<u32>,
     pub meshlets: Vec<StaticMeshletDescription>,
     pub mesh_infos: Vec<MeshInfo>,
+    pub meshlet_vertex_redirect: Vec<u32>,
+    pub meshlet_local_indices: Vec<u32>,
     pub instances: Vec<InstanceData>,
     pub indirect_commands: Vec<DrawIndexedIndirectCommand>,
     pub culling_tasks: Vec<CullingTask>,
@@ -56,48 +58,70 @@ pub fn generate_grid(
 }
 
 pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
-    // 1. Геометрия стандартного куба (8 вершин) с нормалями и UV
+    // 1. Геометрия стандартного куба (8 уникальных вершин)
     let vertices = vec![
-        // Передняя грань
-        StaticVertex { position: [-0.5, -0.5,  0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [ 0.5, -0.5,  0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [ 0.5,  0.5,  0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [-0.5,  0.5,  0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        // Задняя грань
-        StaticVertex { position: [-0.5, -0.5, -0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [ 0.5, -0.5, -0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [ 0.5,  0.5, -0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
-        StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [-0.5, -0.5,  0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 0
+        StaticVertex { position: [ 0.5, -0.5,  0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 1
+        StaticVertex { position: [ 0.5,  0.5,  0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 2
+        StaticVertex { position: [-0.5,  0.5,  0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 3
+        StaticVertex { position: [-0.5, -0.5, -0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 4
+        StaticVertex { position: [ 0.5, -0.5, -0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 5
+        StaticVertex { position: [ 0.5,  0.5, -0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 6
+        StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 7
     ];
 
-    // Индексы для всех 6 граней куба (12 треугольников, 36 индексов)
-    let indices = vec![
-        0, 1, 2,  2, 3, 0, // Передняя
-        1, 5, 6,  6, 2, 1, // Правая
-        7, 6, 5,  5, 4, 7, // Задняя
-        4, 0, 3,  3, 7, 4, // Левая
-        4, 5, 1,  1, 0, 4, // Нижняя
-        3, 2, 6,  6, 7, 3, // Верхняя
+    // Генерируем шаблон-пустышку индексов (просто линейный массив от 0 до максимального index_count мешлета, т.е. 18)
+    let dummy_indices_template: Vec<u32> = (0..18).collect();
+
+    // 2. Строим таблицы перенаправления и локальных индексов для мешлетов куба
+    // Мешлет 1 (содержит вершины 0, 1, 2, 3, 5, 6 для первых 3 граней)
+    let meshlet1_redirect = vec![0, 1, 2, 3, 5, 6]; 
+    // Локальные индексы треугольников, ссылающиеся строго на индексы внутри meshlet1_redirect (0..5)
+    let meshlet1_local_indices = vec![
+        0, 1, 2,  2, 3, 0, // Передняя грань (вершины 0,1,2,3)
+        1, 4, 5,  5, 2, 1, // Правая грань (вершины 1,5,6,2 -> локальные 1,4,5,2)
+        3, 2, 5,  5, 2, 3, // Пример верхней грани куба (усеченно для тестов)
     ];
 
-    // 2. Разбиваем куб на 2 тестовых мешлета (по 18 индексов каждый)
+    // Мешлет 2 (оставшаяся геометрия куба)
+    let meshlet2_redirect = vec![4, 5, 6, 7, 0, 3];
+    let meshlet2_local_indices = vec![
+        3, 2, 1,  1, 0, 3, // Задняя грань
+        0, 4, 5,  5, 1, 0, // Левая грань
+        0, 1, 4,  4, 5, 0, // Нижня грань
+    ];
+
+    // Объединяем локальные данные мешлетов в глобальные массивы для GPU
+    let mut meshlet_vertex_redirect = Vec::new();
+    let mut meshlet_local_indices = Vec::new();
+
+    // Запоминаем стартовые смещения в мега-буферах мешлетов
+    let m1_vertex_offset = meshlet_vertex_redirect.len() as u32;
+    meshlet_vertex_redirect.extend(&meshlet1_redirect);
+    let m1_index_offset = meshlet_local_indices.len() as u32;
+    meshlet_local_indices.extend(&meshlet1_local_indices);
+
+    let m2_vertex_offset = meshlet_vertex_redirect.len() as u32;
+    meshlet_vertex_redirect.extend(&meshlet2_redirect);
+    let m2_index_offset = meshlet_local_indices.len() as u32;
+    meshlet_local_indices.extend(&meshlet2_local_indices);
+
+    // Описание мешлетов
     let meshlets = vec![
-        // Мешлет 1: Первые 3 грани. Задаем локальный AABB.
         StaticMeshletDescription {
             aabb_min: [-0.5, -0.5, -0.5],
-            vertex_offset: 0,
+            vertex_offset: m1_vertex_offset,
             aabb_max: [0.5, 0.5, 0.5],
-            index_offset: 0,
+            index_offset: m1_index_offset,
             index_count: 18,
             material_index: 0,
             pad0: 0, pad1: 0,
         },
-        // Мешлет 2: Оставшиеся 3 грани.
         StaticMeshletDescription {
             aabb_min: [-0.5, -0.5, -0.5],
-            vertex_offset: 0,
+            vertex_offset: m2_vertex_offset,
             aabb_max: [0.5, 0.5, 0.5],
-            index_offset: 18,
+            index_offset: m2_index_offset,
             index_count: 18,
             material_index: 0,
             pad0: 0, pad1: 0,
@@ -107,37 +131,40 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
     // Описываем наш единственный базовый меш (Куб)
     let mesh_infos = vec![MeshInfo {
         start_meshlet_index: 0,
-        meshlet_count: 2, // У нашего куба 2 мешлета
+        meshlet_count: 2, 
         vertex_buffer_offset: 0,
         base_vertex: 0,
     }];
 
-    // 3. Генерируем инстансы кубов на сцене
+    // 3. Генерируем инстансы кубов и их персональные indirect-команды
     let mut instances = Vec::new();
     let mut indirect_commands = Vec::new();
-
-    // Создаем ВСЕГО 2 команды на всю сцену!
-    // Команда 0 рисует первую половину ВСЕХ видимых кубов
-    indirect_commands.push(DrawIndexedIndirectCommand {
-        index_count: 18,
-        instance_count: 0, // Заполнит шейдер
-        first_index: 0,
-        base_vertex: 0,
-        first_instance: 0, // Пишет в visible_instances с 0 по 99 slot
-    });
-
-    // Команда 1 рисует вторую половину ВСЕХ видимых кубов
-    indirect_commands.push(DrawIndexedIndirectCommand {
-        index_count: 18,
-        instance_count: 0, // Заполнит шейдер
-        first_index: 18,
-        base_vertex: 0,
-        first_instance: num_instances, // Пишет в visible_instances со 100 по 199 slot
-    });
 
     for i in 0..num_instances {
         let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
         let model_matrix = Mat4::from_translation(position);
+
+        // У каждого инстанса `i` будет своя пара indirect-команд.
+        // Инстанс 0 займет команды 0 и 1, Инстанс 1 займет 2 и 3, и т.д.
+        let base_command_id = (i * 2) as u32;
+
+        // Команда для Мешлета 1 текущего куба
+        indirect_commands.push(DrawIndexedIndirectCommand {
+            index_count: 18,
+            instance_count: 0, 
+            first_index: 0,     // Ссылается на начало dummy_indices_template
+            base_vertex: 0,
+            first_instance: base_command_id, // Уникальный слот в visible_instances
+        });
+
+        // Команда для Мешлета 2 текущего куба
+        indirect_commands.push(DrawIndexedIndirectCommand {
+            index_count: 18,
+            instance_count: 0, 
+            first_index: 0,     // Ссылается на начало dummy_indices_template
+            base_vertex: 0,
+            first_instance: base_command_id + 1, // Уникальный слот в visible_instances
+        });
 
         instances.push(InstanceData {
             model_matrix: model_matrix.to_cols_array_2d(),
@@ -145,8 +172,8 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             node_index: 0,
             joints_offset: 0,
             material_index: 0,
-            primitive_index: 0, // Ссылается на mesh_infos[0]
-            pad0: 0, // Не используется в этой схеме
+            primitive_index: 0, 
+            pad0: base_command_id,    // Передаем шейдеру стартовый ID его команд
             pad1: 0, pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
             pad_aabb1: 0,
@@ -164,11 +191,14 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
 
     TestSceneData {
         vertices,
-        indices,
+        indices: dummy_indices_template, // Возвращаем шаблон вместо старых индексов
         meshlets,
         mesh_infos,
+        meshlet_local_indices,           // Не забудьте добавить эти поля в вашу TestSceneData
+        meshlet_vertex_redirect,          // Не забудьте добавить эти поля в вашу TestSceneData
         instances,
         indirect_commands,
         culling_tasks,
     }
 }
+

@@ -225,7 +225,7 @@ async fn run() {
 
     let static_test_scene = generate_static_test_data(100);
     
-    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, static_test_scene.indirect_commands.len(), &init_data);
+    let mut static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, static_test_scene.indirect_commands.len(), &init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -257,7 +257,7 @@ async fn run() {
    
     model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);    
 
-    static_bindless_resources.init(&queue, &static_test_scene.vertices, &static_test_scene.indices, &static_test_scene.meshlets, &static_test_scene.mesh_infos, &init_data.factors, &static_test_scene.indirect_commands);
+    static_bindless_resources.init(&queue, &static_test_scene.vertices, &static_test_scene.indices, &static_test_scene.meshlets, &static_test_scene.mesh_infos, &init_data.factors, &static_test_scene.meshlet_local_indices, &static_test_scene.meshlet_vertex_redirect, &static_test_scene.indirect_commands);
 
     object_group.objects.push(object);
 
@@ -904,7 +904,7 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &static_test_scene.indirect_commands);
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);

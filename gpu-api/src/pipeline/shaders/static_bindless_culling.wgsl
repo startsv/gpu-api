@@ -11,8 +11,8 @@ struct InstanceData {
     node_index: u32,
     joints_offset: u32,
     material_index: u32,
-    primitive_index: u32, // Будем использовать как mesh_info_index (всегда 0 для куба)
-    base_command_id: u32, // Переименовали pad0! Сюда запишем i * 2 для indirect-команд
+    primitive_index: u32,  // Используется как mesh_info_index
+    base_command_id: u32,  // Смещение первой indirect-команды для данного типа меша
     pad1: u32,
     pad2: u32,
     aabb_min: vec3<f32>,
@@ -57,6 +57,7 @@ struct DrawIndexedIndirectCommand {
 struct VisibleInstanceData {
     instance_id: u32,
     material_index: u32,
+    meshlet_index: u32, // Добавлено поле, чтобы Vertex Shader знал, какой именно мешлет рисовать!
 };
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -68,6 +69,29 @@ struct VisibleInstanceData {
 
 @group(1) @binding(4) var<storage, read_write> visible_instances: array<VisibleInstanceData>;
 @group(1) @binding(5) var<storage, read_write> indirect_commands: array<DrawIndexedIndirectCommand>;
+
+// Вспомогательная функция для трансформации локального AABB в Мировой AABB
+fn transform_aabb(aabb_min: vec3<f32>, aabb_max: vec3<f32>, m: mat4x4<f32>) -> array<vec3<f32>, 2> {
+    let center = (aabb_min + aabb_max) * 0.5;
+    let extents = (aabb_max - aabb_min) * 0.5;
+    
+    let world_center = (m * vec4<f32>(center, 1.0)).xyz;
+    
+    let row0 = vec3<f32>(abs(m[0].x), abs(m[1].x), abs(m[2].x));
+    let row1 = vec3<f32>(abs(m[0].y), abs(m[1].y), abs(m[2].y));
+    let row2 = vec3<f32>(abs(m[0].z), abs(m[1].z), abs(m[2].z));
+    
+    let world_extents = vec3<f32>(
+        dot(row0, extents),
+        dot(row1, extents),
+        dot(row2, extents)
+    );
+    
+    var result: array<vec3<f32>, 2>;
+    result[0] = world_center - world_extents;
+    result[1] = world_center + world_extents;
+    return result;
+}
 
 fn is_aabb_visible(aabb_min: vec3<f32>, aabb_max: vec3<f32>) -> bool {
     for (var i = 0u; i < 6u; i = i + 1u) {
@@ -88,32 +112,43 @@ fn is_aabb_visible(aabb_min: vec3<f32>, aabb_max: vec3<f32>) -> bool {
 fn culling_main(
     @builtin(global_invocation_id) global_id: vec3<u32>
 ) {
-    let global_instance_id = global_id.x;
     let task = culling_tasks[0u]; 
+    let global_instance_id = task.start_object_index + global_id.x;
     
-    if (global_instance_id >= task.object_count) { return; }
+    if (global_id.x >= task.object_count) { return; }
     
     let instance = global_instances[global_instance_id];
+    
+    // ЭТАП 1: Куллинг на уровне объектов
+    let world_object_aabb = transform_aabb(instance.aabb_min, instance.aabb_max, instance.model_matrix);
+    
+    if (!is_aabb_visible(world_object_aabb[0], world_object_aabb[1])) {
+        return; // Объект целиком не виден, пропускаем все его мешлеты
+    }
+    
     let mesh_info = global_mesh_infos[instance.primitive_index];
             
+    // ЭТАП 2: Куллинг на уровне мешлетов внутри видимого объекта
     for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
+        let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
+        let meshlet = global_meshlets[global_meshlet_id];
         
-        // ВРЕМЕННО ХАРДКОДИМ ИСТИНУ ДЛЯ ОТЛАДКИ ВЫВОДА ВСЕХ КУБОВ
-        if (true) {                                
-            // cmd_id равен строго 0 или 1 (индекс мешлета)
-            let cmd_id = m_idx; 
+        let world_meshlet_aabb = transform_aabb(meshlet.aabb_min, meshlet.aabb_max, instance.model_matrix);
+        
+        if (is_aabb_visible(world_meshlet_aabb[0], world_meshlet_aabb[1])) {
+            
+            // Динамический ID команды: базовая команда меша + локальный индекс видимого мешлета
+            let cmd_id = instance.base_command_id + m_idx; 
                             
-            // Атомарно увеличиваем количество инстансов для этого мешлета
+            // Увеличиваем счетчик инстансов для конкретной indirect-команды мешлета
             let local_slot = atomicAdd(&indirect_commands[cmd_id].instance_count, 1u);
                             
-            // Вычисляем плотный индекс записи
-            // Для Мешлета 0: 0 + local_slot (диапазон 0..99)
-            // Для Мешлета 1: 100 + local_slot (диапазон 100..199)
             let base_offset = indirect_commands[cmd_id].first_instance;
             let write_index = base_offset + local_slot;
                                         
             visible_instances[write_index].instance_id = global_instance_id;
             visible_instances[write_index].material_index = instance.material_index;
+            visible_instances[write_index].meshlet_index = global_meshlet_id; // Передаем в рендер
         }
     }
 }
