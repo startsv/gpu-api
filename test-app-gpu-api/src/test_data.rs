@@ -59,15 +59,15 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
     // 1. Геометрия стандартного куба (8 вершин) с нормалями и UV
     let vertices = vec![
         // Передняя грань
-        StaticVertex { position: [-0.5, -0.5,  0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [ 0.5, -0.5,  0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [ 0.5,  0.5,  0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [-0.5,  0.5,  0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
+        StaticVertex { position: [-0.5, -0.5,  0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [ 0.5, -0.5,  0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [ 0.5,  0.5,  0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [-0.5,  0.5,  0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
         // Задняя грань
-        StaticVertex { position: [-0.5, -0.5, -0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [ 0.5, -0.5, -0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [ 0.5,  0.5, -0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
-        StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0] },
+        StaticVertex { position: [-0.5, -0.5, -0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [ 0.5, -0.5, -0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [ 0.5,  0.5, -0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
+        StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() },
     ];
 
     // Индексы для всех 6 граней куба (12 треугольников, 36 индексов)

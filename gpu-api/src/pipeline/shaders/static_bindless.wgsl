@@ -27,12 +27,18 @@ struct CameraUniform {
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
 
 struct StaticVertex {    
-    position: vec3<f32>,    
+    position: vec3<f32>,
+    pad0: f32,            // Выравниваем position до vec4!
     uv: vec2<f32>,
+    pad1: vec2<f32>,      // Выравниваем uv до vec4!
     normal: vec3<f32>,
+    pad2: f32,            // Выравниваем normal до vec4!
     tangent: vec3<f32>,
+    pad3: f32,            // Выравниваем tangent до vec4!
     bitangent: vec3<f32>,
+    pad4: f32,            // Выравниваем bitangent до vec4!
 };
+
 
 struct NodeData {
     info: vec4<u32>,
@@ -88,20 +94,21 @@ fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    // Получаем плотный индекс видимости мешлета
+    // 1. Читаем из буфера атомиков куллинга
     let render_data = visible_instances[draw_instance_idx];
+    
+    // 2. Получаем инстанс
     let instance = global_instances[render_data.instance_id];
     
-    // ИСВРАВЛЕНИЕ: Используем instance.primitive_index вместо несуществующего mesh_info_index
-    let mesh_info = global_mesh_infos[instance.primitive_index];
+    // 3. Достаем ноду и метаданные меша
     let node = global_nodes[instance.node_index];
+    let mesh_info = global_mesh_infos[instance.primitive_index]; // Используем primitive_index как ID меша
     
-    // Вычисляем абсолютный индекс вершины в Storage-массиве static_vertices.
-    // Так как в тестовых данных индексы глобальные для куба, прибавляем оффсет меша:
+    // 4. Вычисляем глобальный индекс вершины (учитывая ручной Vertex Pulling сдвиг)
     let global_vertex_idx = vertex_id + mesh_info.vertex_buffer_offset;
-    
     let vertex = static_vertices[global_vertex_idx];
     
+    // 5. Трансформация позиций
     let model_matrix = instance.model_matrix * node.transform;
     let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     

@@ -25,12 +25,17 @@ pub struct Vertex {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
-pub struct StaticVertex {    
-    pub position: [f32; 3],    
+pub struct StaticVertex {
+    pub position: [f32; 3],
+    pub pad0: f32,
     pub uv: [f32; 2],
+    pub pad1: [f32; 2],
     pub normal: [f32; 3],
+    pub pad2: f32,
     pub tangent: [f32; 3],
-    pub bitangent: [f32; 3],    
+    pub pad3: f32,
+    pub bitangent: [f32; 3],
+    pub pad4: f32,
 }
 
 #[repr(C)]
