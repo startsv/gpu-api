@@ -39,14 +39,21 @@ struct NodeData {
     transform: mat4x4<f32>,
 };
 
+struct MeshInfo {
+    start_meshlet_index: u32,
+    meshlet_count: u32,
+    vertex_buffer_offset: u32,
+    base_vertex: i32,
+};
+
 struct InstanceData {
     model_matrix: mat4x4<f32>,
     is_animated: u32,
     node_index: u32,
     joints_offset: u32,
     material_index: u32,
-    primitive_index: u32,
-    pad0: u32,
+    primitive_index: u32, // Будем использовать как mesh_info_index (всегда 0 для куба)
+    base_command_id: u32, // Переименовали pad0! Сюда запишем i * 2 для indirect-команд
     pad1: u32,
     pad2: u32,
     aabb_min: vec3<f32>,
@@ -63,7 +70,8 @@ struct VisibleInstanceData {
 @group(2) @binding(0) var<storage, read> static_vertices: array<StaticVertex>;
 @group(2) @binding(1) var<storage, read> global_nodes: array<NodeData>;
 @group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
-@group(2) @binding(3) var<storage, read> visible_instances: array<VisibleInstanceData>;
+@group(2) @binding(3) var<storage, read> global_mesh_infos: array<MeshInfo>;
+@group(2) @binding(4) var<storage, read> visible_instances: array<VisibleInstanceData>;
 
 struct FragmentInput {
     @builtin(position) clip_position: vec4<f32>,
@@ -80,13 +88,19 @@ fn vs_main(
     @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    
-    // ПРОГРАММНЫЙ ФЕТЧИНГ (Vertex Pulling): вручную вытягиваем вершину из Storage-буфера
-    let vertex = static_vertices[vertex_id];
-    
+    // Получаем плотный индекс видимости мешлета
     let render_data = visible_instances[draw_instance_idx];
     let instance = global_instances[render_data.instance_id];
+    
+    // ИСВРАВЛЕНИЕ: Используем instance.primitive_index вместо несуществующего mesh_info_index
+    let mesh_info = global_mesh_infos[instance.primitive_index];
     let node = global_nodes[instance.node_index];
+    
+    // Вычисляем абсолютный индекс вершины в Storage-массиве static_vertices.
+    // Так как в тестовых данных индексы глобальные для куба, прибавляем оффсет меша:
+    let global_vertex_idx = vertex_id + mesh_info.vertex_buffer_offset;
+    
+    let vertex = static_vertices[global_vertex_idx];
     
     let model_matrix = instance.model_matrix * node.transform;
     let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
