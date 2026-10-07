@@ -158,7 +158,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             index_count: 18,
             instance_count: 0, 
             first_index: 0, // СТРОГО 0
-            base_vertex: (base_command_id << 16) as i32, // Запекаем ID в старшие 16 бит
+            base_vertex: (base_command_id << 10) as i32, // Запекаем ID в старшие 16 бит
             first_instance: 0, 
         });
 
@@ -167,7 +167,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             index_count: 18,
             instance_count: 0, 
             first_index: 0, // СТРОГО 0
-            base_vertex: ((base_command_id + 1) << 16) as i32, // Запекаем ID в старшие 16 бит
+            base_vertex: ((base_command_id + 1) << 10) as i32, // Запекаем ID в старшие 16 бит
 
             first_instance: 0, 
         });

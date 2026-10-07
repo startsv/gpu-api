@@ -123,10 +123,10 @@ fn vs_main(
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
     // Извлекаем ID команды из старших 16 бит (сдвиг вправо)
-    let cmd_id = hardware_vertex_id >> 16u;
+    let cmd_id = hardware_vertex_id >> 10u;
     
     // Извлекаем чистый локальный индекс вершины (остаток в младших 16 битах)
-    let vertex_id = hardware_vertex_id & 0xFFFFu;
+    let vertex_id = hardware_vertex_id & 0x3FFu;
     
     // Теперь cmd_id ЖЕСТКО уникален для каждого мешлета и равен 0, 1, 2... 199!
     let render_data = visible_instances[cmd_id];
