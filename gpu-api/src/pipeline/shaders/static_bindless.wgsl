@@ -27,11 +27,11 @@ struct CameraUniform {
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
 
 struct StaticVertex {    
-    @location(0) position: vec3<f32>,    
-    @location(1) uv: vec2<f32>,
-    @location(2) normal: vec3<f32>,
-    @location(3) tangent: vec3<f32>,
-    @location(4) bitangent: vec3<f32>,
+    position: vec3<f32>,    
+    uv: vec2<f32>,
+    normal: vec3<f32>,
+    tangent: vec3<f32>,
+    bitangent: vec3<f32>,
 };
 
 struct NodeData {
@@ -77,29 +77,30 @@ struct FragmentInput {
 
 @vertex
 fn vs_main(
-    vertex_input: StaticVertex,
+    @builtin(vertex_index) vertex_id: u32,
     @builtin(instance_index) draw_instance_idx: u32
-) -> FragmentInput {        
+) -> FragmentInput {    
+    
+    // ПРОГРАММНЫЙ ФЕТЧИНГ (Vertex Pulling): вручную вытягиваем вершину из Storage-буфера
+    let vertex = static_vertices[vertex_id];
+    
     let render_data = visible_instances[draw_instance_idx];
-        
     let instance = global_instances[render_data.instance_id];
     let node = global_nodes[instance.node_index];
-        
+    
     let model_matrix = instance.model_matrix * node.transform;
-
-    let model_position = model_matrix * vec4<f32>(vertex_input.position, 1.0);
+    let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     
     var out: FragmentInput;
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
-    out.uv = vertex_input.uv;
-        
+    out.uv = vertex.uv;
     out.material_index = render_data.material_index; 
-            
+        
     let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
-    out.normal = normalize(normal_matrix * vertex_input.normal);
-    out.tangent = normalize(normal_matrix * vertex_input.tangent);
-    out.bitangent = normalize(normal_matrix * vertex_input.bitangent);
+    out.normal = normalize(normal_matrix * vertex.normal);
+    out.tangent = normalize(normal_matrix * vertex.tangent);
+    out.bitangent = normalize(normal_matrix * vertex.bitangent);
     
     return out;    
 }

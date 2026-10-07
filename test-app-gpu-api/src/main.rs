@@ -13,6 +13,10 @@ use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::Frame
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
 
+use crate::test_data::{generate_grid, generate_static_test_data};
+
+mod test_data;
+
 pub const TARGET_FPS: u32 = 200;
 pub const FRAME_CYCLE_LENGTH_FOR_ANIMATION: usize = 200;
 
@@ -214,10 +218,12 @@ async fn run() {
 
     let indirect_commands = World::generate_initial_indirect_commands(&registered_primitives);
 
-    let model_bindless_resources = pipeline::model_bindless_pipeline::ModelBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state,
+    let model_bindless_resources = pipeline::model_bindless_pipeline::ModelBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state.clone(),
         registered_primitives.len(),
         &mut init_data
     );
+
+    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 20, &init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -248,6 +254,10 @@ async fn run() {
     test_world.prepare_gpu_indirect_frame(&frame_data, &mut model_culling_tasks, &mut global_instances);
    
     model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);
+
+    let static_test_scene = generate_static_test_data(10);
+
+    static_bindless_resources.init(&queue, &static_test_scene.vertices, &static_test_scene.indices, &static_test_scene.meshlets, &static_test_scene.mesh_infos, &init_data.factors, &indirect_commands);
 
     object_group.objects.push(object);
 
@@ -823,13 +833,24 @@ async fn run() {
 
                                 surface_resources.compute_gpu_driven_frame(&mut compute_pass, surface_data.meshlets.len() as u32);
                             }
-                            
-                            
+                                                        
                             if init_data.nodes.is_empty() {
                                 init_data.nodes.push(NodeData {
                                     info: [0, 0, 0, 0],
                                     transform: Mat4::IDENTITY,
                                 });
+                            }
+
+                            static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
+                            static_bindless_resources.clear_gpu_driven_frame(&mut encoder);
+
+                            {
+                                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some("Static Bindless Culling Pass"),
+                                    timestamp_writes: None,
+                                });
+
+                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, &model_culling_tasks);
                             }
 
                             model_bindless_resources.load_frame(&queue, &mut encoder, &camera, &mut staging_belt, &global_instances, &init_data.nodes,
@@ -882,7 +903,8 @@ async fn run() {
                                         multiview_mask: None
                                     }
                                 );
-            
+
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &static_test_scene.indirect_commands);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, &indirect_commands);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
@@ -1069,47 +1091,4 @@ pub fn generate_test_surface(
     });
 
     surface_data
-}
-
-pub fn generate_grid(
-    lines: &mut Vec<AaLineInstance>, 
-    slices: i32, 
-    step: f32, 
-    width: f32
-) {
-    let half_size = slices as f32 * step;
-        
-    let default_color = [0.3, 0.3, 0.3, 1.0];
-    let axis_x_color  = [0.8, 0.2, 0.2, 1.0];
-    let axis_z_color  = [0.2, 0.2, 0.8, 1.0];
-
-    for i in -slices..=slices {
-        let current_coord = i as f32 * step;
-        
-        let color_z = if i == 0 { 
-            axis_z_color
-        } else { 
-            default_color 
-        };
-        
-        lines.push(AaLineInstance {
-            color: color_z,
-            width,
-            start_pos: [current_coord, 0.0, -half_size],
-            end_pos:   [current_coord, 0.0, half_size],
-        });
-        
-        let color_x = if i == 0 { 
-            axis_x_color
-        } else { 
-            default_color 
-        };
-
-        lines.push(AaLineInstance {
-            color: color_x,
-            width,
-            start_pos: [-half_size, 0.0, current_coord],
-            end_pos:   [half_size, 0.0, current_coord],
-        });
-    }
 }

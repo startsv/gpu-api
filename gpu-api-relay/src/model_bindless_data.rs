@@ -24,6 +24,16 @@ pub struct Vertex {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct StaticVertex {    
+    pub position: [f32; 3],    
+    pub uv: [f32; 2],
+    pub normal: [f32; 3],
+    pub tangent: [f32; 3],
+    pub bitangent: [f32; 3],    
+}
+
+#[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct NodeData {    
     pub info: [u32; 4],    
@@ -65,7 +75,7 @@ pub struct CullingTask {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct VisibleInstanceData {
     pub instance_id: u32,
-    pub material_index: u32,
+    pub material_idx: u32,
 }
 
 pub struct PrimitiveMeta {    
