@@ -93,6 +93,7 @@ async fn run() {
                     wgpu::Limits {
                         max_binding_array_elements_per_shader_stage: gpu_api::pipeline::model_bindless_pipeline::MAX_TEXTURES * 8,
                         max_binding_array_sampler_elements_per_shader_stage: gpu_api::pipeline::model_bindless_pipeline::MAX_TEXTURES * 4,
+                        max_storage_buffers_per_shader_stage: 16,
                         ..Default::default()
                     }
                 },
