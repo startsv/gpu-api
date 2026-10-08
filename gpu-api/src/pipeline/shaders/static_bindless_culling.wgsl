@@ -92,16 +92,7 @@ var<workgroup> wg_local_tasks: array<LocalTask, 256>; // Накапливаем 
 fn culling_main(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(local_invocation_index) local_id: u32
-) {
-    // ---------------------------------------------------------------------
-    // УЛЬТИМАТИВНЫЙ ФИКС: САМООЧИСТКА НА GPU СИЛАМИ ПЕРВОГО ПОТОКА СЦЕНЫ
-    // ---------------------------------------------------------------------
-    if (global_id.x == 0u) {
-        // Жестко пишем 0 в глобальный счетчик прямо из шейдера.
-        // Никаких race condition с CPU шиной больше физически быть не может.
-        atomicStore(&command_counter.count, 0u);
-    }
-    
+) {    
     // Инициализируем локальный счетчик группы силами первого потока конкретной группы
     if (local_id == 0u) {
         atomicStore(&wg_visible_count, 0u);
