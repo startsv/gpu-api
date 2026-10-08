@@ -24,14 +24,14 @@ pub struct FrameResourceRanges {
     pub camera: BufferRange,
 }
 
-pub struct FrameResources {
+pub struct FrameBindgroups {
     // Вся кадровые данные теперь находятся внутри единого монолитного frame_ring_buffer,
     // но для удобства мы сохраняем готовые BindGroup, нарезающие этот буфер на срезы.
     pub culling_compute_bind_group: wgpu::BindGroup,
     pub render_bind_group: wgpu::BindGroup,
 }
 
-impl FrameResources {
+impl FrameBindgroups {
     pub fn create(
         device: &wgpu::Device,
         // Layout'ы пайплайнов для сборки BindGroup
@@ -41,6 +41,7 @@ impl FrameResources {
         // Ссылки на 2 основных монолитных буфера, откуда нарезаются срезы
         scene_data_buffer: &wgpu::Buffer,
         frame_ring_buffer: &wgpu::Buffer,
+        camera_ring_buffer: &wgpu::Buffer,
         vertex_range: &BufferRange,     // <--- Добавлено!
         // Глобальные статические диапазоны памяти сцены
         culling_tasks_range: &BufferRange,
@@ -69,7 +70,9 @@ impl FrameResources {
                     wgpu::BindGroupEntry { 
                         binding: 0, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
+                            buffer: &camera_ring_buffer, // <--- ИСПРАВЛЕНО
+                            offset: ranges.camera.offset, 
+                            size: wgpu::BufferSize::new(std::mem::size_of::<CameraUniform>() as u64)
                         })
                     },
                     wgpu::BindGroupEntry { 
@@ -129,7 +132,7 @@ impl FrameResources {
                     wgpu::BindGroupEntry { 
                         binding: 0, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
+                            buffer: camera_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
                         })
                     },
                     // binding(1): static_vertices
@@ -192,7 +195,7 @@ impl FrameResources {
                 ],
             });
 
-            frame_resources.push(FrameResources {
+            frame_resources.push(FrameBindgroups {
                 culling_compute_bind_group,
                 render_bind_group,
             });

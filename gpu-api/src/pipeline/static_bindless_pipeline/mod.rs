@@ -3,12 +3,12 @@ use gpu_api_dto::TextureType;
 use gpu_api_relay::model_bindless_data::{CameraUniform, CullingTask, DrawIndexedIndirectCommand, MaterialFactors, NodeData, StaticVertex, VisibleInstanceData};
 use log::info;
 use wgpu::{TextureFormat, util::{DeviceExt, StagingBelt}};
-use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::static_bindless_frame_res::{BufferRange, FrameResourceRanges, FrameResources}}};
+use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::static_bindless_frame_bg::{BufferRange, FrameResourceRanges, FrameBindgroups}}};
 
 pub mod static_bindless_layout;
 pub mod static_bindless_pipelines;
 pub mod static_bindless_new;
-pub mod static_bindless_frame_res;
+pub mod static_bindless_frame_bg;
 pub mod static_bindless_frame;
 
 pub const MAX_VERTICES: u64 = 1_000_000;
@@ -80,6 +80,7 @@ pub struct StaticBindlessResources {
     pub geometry_buffer: wgpu::Buffer,   // Вершины + Сквозной индексный шаблон
     pub scene_data_buffer: wgpu::Buffer, // Статические структуры данных сцены
     pub frame_ring_buffer: wgpu::Buffer, // Кольцевой буфер динамических данных (Anti-Flicker)
+    pub camera_ring_buffer: wgpu::Buffer,
 
     pub materials_buffer: wgpu::Buffer,
 
@@ -97,7 +98,7 @@ pub struct StaticBindlessResources {
 
     // 3. ДИАПАЗОНЫ КАДРОВЫХ ДАННЫХ
     pub frame_ranges: Vec<FrameResourceRanges>,
-    pub frame_resources: Vec<FrameResources>,
+    pub frame_resources: Vec<FrameBindgroups>,
     pub frame_index: usize,
     pub max_meshlets_count: u32,
 

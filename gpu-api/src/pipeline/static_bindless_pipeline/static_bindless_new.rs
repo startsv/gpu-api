@@ -3,7 +3,7 @@ use gpu_api_dto::TextureType;
 use gpu_api_relay::model_bindless_data::{CameraUniform, CullingTask, DrawIndexedIndirectCommand, MaterialFactors, NodeData, StaticVertex, VisibleInstanceData};
 use log::info;
 use wgpu::{Queue, TextureFormat, util::{DeviceExt, StagingBelt}};
-use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::{ALIGN, InstanceData, MAX_INDICES, MAX_INSTANCES, MAX_MATERIALS, MAX_MESH_INFOS, MAX_MESHLETS, MAX_NODES, MAX_TEXTURES, MAX_VERTICES, MeshInfo, NUM_FRAMES_IN_FLIGHT, StaticBindlessResources, StaticMeshletDescription, static_bindless_frame_res::{BufferRange, FrameResourceRanges, FrameResources, align_to}, static_bindless_layout::PipelineLayouts, static_bindless_pipelines::create_pipelines}}};
+use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::{ALIGN, InstanceData, MAX_INDICES, MAX_INSTANCES, MAX_MATERIALS, MAX_MESH_INFOS, MAX_MESHLETS, MAX_NODES, MAX_TEXTURES, MAX_VERTICES, MeshInfo, NUM_FRAMES_IN_FLIGHT, StaticBindlessResources, StaticMeshletDescription, static_bindless_frame_bg::{BufferRange, FrameResourceRanges, FrameBindgroups, align_to}, static_bindless_layout::PipelineLayouts, static_bindless_pipelines::create_pipelines}}};
 
 impl StaticBindlessResources {
     pub fn new(device: &wgpu::Device, queue: &Queue, init_data: &InitData, depth_stencil: Option<wgpu::DepthStencilState>) -> Self {
@@ -85,14 +85,15 @@ impl StaticBindlessResources {
         });
 
         // =====================================================================
-        // БУФЕР 3: FrameRingBuffer (Динамическое кадровое кольцо)
+        // БУФЕР 3: frame_ring_buffer (Только STORAGE и INDIRECT)
         // =====================================================================
         let mut ring_offset = 0;
+        let mut camera_offset = 0; // Для отдельного буфера камер
         let mut frame_ranges = Vec::new();
 
-        let counter_size = 4; // u32 атомарный счетчик
-        let indirect_size = (MAX_MESHLETS as u64) * 20; // DrawIndexedIndirectArgs (20 байт)
-        let visible_instances_size = (MAX_MESHLETS as u64) * 4; // Массив u32 индексов видимых мешлетов
+        let counter_size = 4; 
+        let indirect_size = (max_meshlets_count as u64) * 20; 
+        let visible_instances_size = (max_meshlets_count as u64) * 4; 
         let camera_size = align_to(std::mem::size_of::<CameraUniform>() as u64, ALIGN);
 
         for _ in 0..NUM_FRAMES_IN_FLIGHT {
@@ -105,31 +106,38 @@ impl StaticBindlessResources {
             let visible_instances_offset = ring_offset;
             ring_offset = align_to(ring_offset + visible_instances_size, ALIGN);
 
-            let camera_offset = ring_offset;
-            ring_offset = align_to(ring_offset + camera_size, ALIGN);
+            // Оффсет для кадра считается в своем независимом буфере
+            let current_camera_offset = camera_offset;
+            camera_offset = align_to(camera_offset + camera_size, ALIGN);
 
             frame_ranges.push(FrameResourceRanges {
                 counter: BufferRange { offset: counter_offset, size: counter_size },
                 indirect: BufferRange { offset: indirect_offset, size: indirect_size },
                 visible_instances: BufferRange { offset: visible_instances_offset, size: visible_instances_size },
-                camera: BufferRange { offset: camera_offset, size: camera_size },
+                camera: BufferRange { offset: current_camera_offset, size: camera_size }, // <--- оффсет в camera_ring_buffer
             });
         }
 
+        // Создаем буфер команд и счетчиков
         let frame_ring_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Frame Ring Buffer (Dynamic Rings)"),
+            label: Some("Frame Ring Buffer (Storage & Indirect Only)"),
             size: ring_offset,
-            usage: wgpu::BufferUsages::STORAGE 
-                | wgpu::BufferUsages::UNIFORM 
-                | wgpu::BufferUsages::INDIRECT 
-                | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Создаем чистый UNIFORM буфер для камер кадра
+        let camera_ring_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera Uniform Ring Buffer"),
+            size: camera_offset,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         // =====================================================================
         // НАРЕЗКА СРЕЗОВ (BufferBinding) И ИНИЦИАЛИЗАЦИЯ BIND GROUPS КАДРОВ
         // =====================================================================
-        let frame_resources = FrameResources::create(device, &layouts.culling_compute_layout, &layouts.render_bind_group_layout, &geometry_buffer, &scene_data_buffer, &frame_ring_buffer, &vertex_range, &culling_tasks_range, &instances_range, &mesh_infos_range, &meshlets_range, &nodes_range, &meshlet_local_indices_range, &meshlet_vertex_redirect_range, &frame_ranges);
+        let frame_resources = FrameBindgroups::create(device, &layouts.culling_compute_layout, &layouts.render_bind_group_layout, &geometry_buffer, &scene_data_buffer, &frame_ring_buffer, &camera_ring_buffer, &vertex_range, &culling_tasks_range, &instances_range, &mesh_infos_range, &meshlets_range, &nodes_range, &meshlet_local_indices_range, &meshlet_vertex_redirect_range, &frame_ranges);
 
         let dummy_size = wgpu::Extent3d {
             width: 1,
@@ -263,6 +271,7 @@ impl StaticBindlessResources {
             geometry_buffer,
             scene_data_buffer,
             frame_ring_buffer,
+            camera_ring_buffer,
             materials_buffer,
             vertex_range,
             index_range,

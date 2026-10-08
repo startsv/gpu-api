@@ -3,11 +3,11 @@ use gpu_api_dto::TextureType;
 use gpu_api_relay::model_bindless_data::{CameraUniform, CullingTask, DrawIndexedIndirectCommand, MaterialFactors, NodeData, StaticVertex, VisibleInstanceData};
 use log::info;
 use wgpu::{TextureFormat, util::{DeviceExt, StagingBelt}};
-use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::{InstanceData, MeshInfo, NUM_FRAMES_IN_FLIGHT, StaticBindlessResources, StaticMeshletDescription, static_bindless_frame_res::FrameResources}}};
+use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitData, static_bindless_pipeline::{InstanceData, MeshInfo, NUM_FRAMES_IN_FLIGHT, StaticBindlessResources, StaticMeshletDescription, static_bindless_frame_bg::FrameBindgroups}}};
 
 impl StaticBindlessResources {
     /// Вспомогательный метод для получения ресурсов текущего активного кадра
-    pub fn current_frame(&self) -> &FrameResources {
+    pub fn current_frame(&self) -> &FrameBindgroups {
         &self.frame_resources[self.frame_index % NUM_FRAMES_IN_FLIGHT]
     }
 
@@ -63,10 +63,10 @@ impl StaticBindlessResources {
                 
             let mut camera_slice = staging_belt.write_buffer(
                 encoder,
-                &self.frame_ring_buffer,
+                &self.camera_ring_buffer,
                 current_ranges.camera.offset, // Выровненный оффсет кадра
                 camera_size_nonzero,
-            );            
+            );
             camera_slice.copy_from_slice(bytemuck::bytes_of(camera_uniform));
         }
 
