@@ -469,10 +469,9 @@ async fn run() {
                     WindowEvent::RedrawRequested => {
                         //frame_counter.simple_update();
                         if frame_counter.tick() {
-                                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                    label: Some("Redraw")
-                                }
-                            );
+                            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Redraw")
+                            });
             
                             // Get the next frame
                             let frame = match surface.get_current_texture() {
@@ -843,9 +842,9 @@ async fn run() {
                                     transform: Mat4::IDENTITY,
                                 });
                             }
-
+                            
                             static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
-                            //static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder);
+                            static_bindless_resources.clear_gpu_driven_frame(&queue);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
