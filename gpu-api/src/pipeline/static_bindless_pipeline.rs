@@ -75,7 +75,7 @@ pub struct StaticBindlessResources {
     pub camera_buffer: wgpu::Buffer,
     
     // Indirect Draw Буферы
-    pub indirect_commands_template_buffer: wgpu::Buffer,
+    pub command_counter_buffer: wgpu::Buffer,
     pub indirect_commands_buffer: wgpu::Buffer,
     
     // Пайплайны и бинд-группы
@@ -88,16 +88,15 @@ pub struct StaticBindlessResources {
     pub render_bind_group: wgpu::BindGroup,
 }
 
-impl StaticBindlessResources {
+impl StaticBindlessResources {    
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,        
         camera_uniform: &CameraUniform,
-        depth_stencil: Option<wgpu::DepthStencilState>,
-        instances_count: usize,
+        depth_stencil: Option<wgpu::DepthStencilState>,        
         total_meshlets_commands_count: usize,        
         init_data: &InitData,
-    ) -> Self {                        
+    ) -> Self {                                
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Mega Vertex Buffer"),
             size: MAX_VERTICES * size_of::<StaticVertex>() as u64,
@@ -183,17 +182,15 @@ impl StaticBindlessResources {
             }
         );
 
-        let indirect_buffer_size = (total_meshlets_commands_count * std::mem::size_of::<DrawIndexedIndirectCommand>()) as u64;
+        let indirect_buffer_size = (total_meshlets_commands_count * std::mem::size_of::<DrawIndexedIndirectCommand>()) as u64;        
 
-        // 1. Создаем буфер-шаблон строго нужного размера (40 байт)
-        let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Static Indirect Commands Template Buffer"),
-            size: indirect_buffer_size, 
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        let command_counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("MDI Command Counter Buffer"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
-        // 2. Создаем рабочий буфер строго нужного размера (40 байт)
+        
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Static Indirect Commands Buffer"),
             size: indirect_buffer_size, 
@@ -206,7 +203,7 @@ impl StaticBindlessResources {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/static_bindless_culling.wgsl").into()),
         });
         
-    let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Static Bindless Culling Compute Bind Group Layout"),
         entries: &[
             // binding(0): culling_tasks (Storage, read)
@@ -267,6 +264,16 @@ impl StaticBindlessResources {
             // binding(5): indirect_commands (Storage, read_write)
             wgpu::BindGroupLayoutEntry {
                 binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false }, // Здесь false, шейдер пишет сюда
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false }, // Здесь false, шейдер пишет сюда
@@ -773,6 +780,10 @@ impl StaticBindlessResources {
                     binding: 5,
                     resource: indirect_commands_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: command_counter_buffer.as_entire_binding(),
+                },
             ],
         });        
 
@@ -805,7 +816,7 @@ impl StaticBindlessResources {
             meshlet_local_indices_buffer,
             meshlet_vertex_redirect_buffer,
             total_meshlets_commands_count: total_meshlets_commands_count as u32,
-            indirect_commands_template_buffer,
+            command_counter_buffer,
             indirect_commands_buffer,
             culling_compute_pipeline,
             render_pipeline,
@@ -817,37 +828,32 @@ impl StaticBindlessResources {
         }        
     }
 
-    // Предположим, что эти новые буферы добавлены в поля вашей структуры:
-    // self.meshlet_local_indices_buffer: wgpu::Buffer
-    // self.meshlet_vertex_redirect_buffer: wgpu::Buffer
-    // self.total_commands_count: Cell<u32> или аналогично
-
     pub fn init(
-        &mut self, // Изменили на &mut self, чтобы сохранить total_commands_count
+        &mut self, 
         queue: &wgpu::Queue,
         vertices: &[StaticVertex],               
-        dummy_indices_template: &[u32],         // ИСПРАВЛЕНИЕ: Это линейный шаблон [0, 1, 2... 384] для растра
+        dummy_indices_template: &[u32],         // Линейный шаблон [0, 1, 2... 384] для локальной развертки треугольника
         meshlets: &[StaticMeshletDescription],  
         mesh_infos: &[MeshInfo],                
         material_factors: &[MaterialFactors],
-        meshlet_local_indices: &[u32],          // НОВОЕ: Локальные индексы треугольников мешлетов
-        meshlet_vertex_redirect: &[u32],         // НОВОЕ: Перенаправление локальных ID в глобальные ID вершин
-        indirect_commands: &[DrawIndexedIndirectCommand] 
+        meshlet_local_indices: &[u32],          
+        meshlet_vertex_redirect: &[u32],         
+        // Параметр indirect_commands больше НЕ НУЖЕН на входе, так как 
+        // команды полностью генерируются внутри Compute-шейдера
     ) {    
+        // Сохраняем общее количество мешлетов в сцене как верхний лимит (для аллокации буферов и фоллбека)
+        self.total_meshlets_commands_count = meshlets.len() as u32;
+
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
         queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(dummy_indices_template));
         queue.write_buffer(&self.meshlets_buffer, 0, bytemuck::cast_slice(meshlets));
         queue.write_buffer(&self.mesh_infos_buffer, 0, bytemuck::cast_slice(mesh_infos));
         queue.write_buffer(&self.materials_buffer, 0, bytemuck::cast_slice(material_factors));
         
-        // НОВОЕ: Загружаем данные топологии мешлетов
         queue.write_buffer(&self.meshlet_local_indices_buffer, 0, bytemuck::cast_slice(meshlet_local_indices));
         queue.write_buffer(&self.meshlet_vertex_redirect_buffer, 0, bytemuck::cast_slice(meshlet_vertex_redirect));
         
-        // Шаблон команд содержит правильные index_count/first_index для каждого мешлета,
-        // но instance_count в нем равен 0.
-        queue.write_buffer(&self.indirect_commands_template_buffer, 0, bytemuck::cast_slice(indirect_commands));
-        queue.write_buffer(&self.indirect_commands_buffer, 0, bytemuck::cast_slice(indirect_commands));
+        // Обратите внимание: self.indirect_commands_template_buffer БОЛЬШЕ НЕ НУЖЕН и удаляется из структуры.
     }
 
     pub fn load_frame(
@@ -878,14 +884,11 @@ impl StaticBindlessResources {
         }
     }
 
+    /// Очищает счетчик команд перед стадией куллинга.
+    /// Заменяет старый тяжелый clear_gpu_driven_frame.
     pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {                
-        encoder.copy_buffer_to_buffer(
-            &self.indirect_commands_template_buffer,
-            0,
-            &self.indirect_commands_buffer,
-            0,
-            self.indirect_commands_buffer.size(), 
-        );        
+        // Вместо копирования всего шаблона команд, мы просто сбрасываем атомарный счетчик в 0
+        encoder.clear_buffer(&self.command_counter_buffer, 0, None);      
     }
 
     pub fn compute_gpu_driven_frame(
@@ -894,9 +897,8 @@ impl StaticBindlessResources {
         total_instances_count: u32, 
     ) {        
         compute_pass.set_pipeline(&self.culling_compute_pipeline);
-        // Привязываем Compute-версию группы (с правами на запись в буфер команд)
         compute_pass.set_bind_group(0, &self.culling_camera_bind_group, &[]);
-        compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]);
+        compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]); // Сюда должен входить binding(6) с command_counter_buffer
         
         let workgroup_count = (total_instances_count + 63) / 64;
         compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
@@ -911,8 +913,26 @@ impl StaticBindlessResources {
         render_pass.set_bind_group(1, &self.render_camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.render_bind_group, &[]); 
         
+        // В качестве индексного буфера используется линейный шаблон [0, 1, 2... 384]
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 
+        // Вариант 1: Использование нативного расширения Multi Draw Indirect Count (Рекомендуется для десктопа)
+        // Для этого ваше WGPU Device должно быть создано с Feature::MULTI_DRAW_INDEXED_INDIRECT_COUNT
+        #[cfg(feature = "native_mdi_count")]
+        render_pass.multi_draw_indexed_indirect_count(
+            &self.indirect_commands_buffer,
+            0,
+            &self.command_counter_buffer,
+            0,
+            self.total_meshlets_commands_count, // Максимально возможный лимит
+        );
+
+        // Вариант 2: Стандартный Multi Draw Indirect (Для WebGPU/Браузеров без расширений)
+        // Раскомментируйте, если пишете под WebGPU. Железо обработает плотный буфер, 
+        // но прочитает его до максимального теоретического лимита сцены. Внутри неинициализированных 
+        // команд instance_count будет равен 0 (благодаря аллокации буфера с Wgpu::BufferUsages::COPY_DST/STORAGE и clear_buffer),
+        // поэтому видеокарта мгновенно пропустит пустые хвосты.
+        #[cfg(not(feature = "native_mdi_count"))]
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 

@@ -23,15 +23,15 @@ struct CameraUniform {
     padding: u32,    
     view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
-};
+}
 
 struct DrawIndexedIndirectCommand {
     index_count: u32,
     instance_count: u32,
     first_index: u32,
     base_vertex: u32,
-    first_instance: u32,
-};
+    first_instance: u32, // Сюда ваш Compute-шейдер пишет индекс мешлета в visible_instances
+}
 
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(1) var<storage, read> indirect_commands: array<DrawIndexedIndirectCommand>;
@@ -47,19 +47,19 @@ struct StaticVertex {
     pad3: f32,
     bitangent: vec3<f32>,
     pad4: f32,
-};
+}
 
 struct NodeData {
     info: vec4<u32>,
     transform: mat4x4<f32>,
-};
+}
 
 struct MeshInfo {
     start_meshlet_index: u32,
     meshlet_count: u32,
     vertex_buffer_offset: u32,
     base_vertex: i32,
-};
+}
 
 struct InstanceData {
     model_matrix: mat4x4<f32>,
@@ -75,24 +75,24 @@ struct InstanceData {
     pad_aabb1: u32,
     aabb_max: vec3<f32>,
     pad_aabb2: u32,
-};
+}
 
 struct StaticMeshletDescription {
     aabb_min: vec3<f32>,
-    vertex_offset: u32,  // Смещение в глобальном Meshlet Vertex Buffer
+    vertex_offset: u32,  
     aabb_max: vec3<f32>,
-    index_offset: u32,   // Смещение в глобальном Meshlet Index Buffer
-    index_count: u32,    // Количество индексов (треугольников * 3)
+    index_offset: u32,   
+    index_count: u32,    
     material_index: u32,
     pad0: u32,
     pad1: u32,
-};
+}
 
 struct VisibleInstanceData {
     instance_id: u32,
     material_index: u32,
-    meshlet_index: u32, // Сюда compute-шейдер записал global_meshlet_id
-};
+    meshlet_index: u32, 
+}
 
 @group(2) @binding(0) var<storage, read> static_vertices: array<StaticVertex>;
 @group(2) @binding(1) var<storage, read> global_nodes: array<NodeData>;
@@ -100,11 +100,8 @@ struct VisibleInstanceData {
 @group(2) @binding(3) var<storage, read> global_mesh_infos: array<MeshInfo>;
 @group(2) @binding(4) var<storage, read> visible_instances: array<VisibleInstanceData>;
 
-// НОВЫЕ БИНДИНГИ ДЛЯ МЕШЛЕТОВ:
 @group(2) @binding(5) var<storage, read> global_meshlets: array<StaticMeshletDescription>;
-// Локальные индексы мешлетов (обычно упакованные u32 или u8, здесь предполагаем плоский массив u32)
 @group(2) @binding(6) var<storage, read> meshlet_local_indices: array<u32>;
-// Глобальный перенаправленный вершинный буфер мешлетов (содержит реальные индексы вершин в static_vertices)
 @group(2) @binding(7) var<storage, read> meshlet_vertex_redirect: array<u32>;
 
 struct FragmentInput {
@@ -115,21 +112,16 @@ struct FragmentInput {
     @location(3) bitangent: vec3<f32>,
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) material_index: u32, 
-};
+}
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) hardware_vertex_id: u32,
-    @builtin(instance_index) draw_instance_idx: u32
+    @builtin(vertex_index) vertex_id: u32,          // Чистый локальный индекс (от 0 до index_count - 1)
+    @builtin(instance_index) draw_instance_idx: u32 // Равен значению first_instance из indirect-команды
 ) -> FragmentInput {    
-    // Извлекаем ID команды из старших 16 бит (сдвиг вправо)
-    let cmd_id = hardware_vertex_id >> 10u;
     
-    // Извлекаем чистый локальный индекс вершины (остаток в младших 16 битах)
-    let vertex_id = hardware_vertex_id & 0x3FFu;
-    
-    // Теперь cmd_id ЖЕСТКО уникален для каждого мешлета и равен 0, 1, 2... 199!
-    let render_data = visible_instances[cmd_id];
+    // Больше никаких битовых сдвигов! draw_instance_idx указывает прямо на элемент в visible_instances
+    let render_data = visible_instances[draw_instance_idx];
     
     let instance = global_instances[render_data.instance_id];
     let meshlet = global_meshlets[render_data.meshlet_index];
@@ -146,7 +138,7 @@ fn vs_main(
     let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     
-    // Вся остальная математика трансформаций (model_matrix и т.д.) остается прежней...
+    // Математика трансформаций координат
     let model_matrix = instance.model_matrix;
     let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     
