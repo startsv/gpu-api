@@ -69,22 +69,28 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 7
     ];
 
-    // ==========================================
+    // =========================================================================
     // МЕШЛЕТ 1: Передняя, Правая и Нижняя грани (6 треугольников = 18 индексов)
+    // Содержит уникальные вершины: 0, 1, 2, 3, 4, 5, 6
     let meshlet1_redirect = vec![0, 1, 2, 3, 4, 5, 6]; 
+    
+    // Маппинг глобальных вершин на индексы в redirect массиве:
     let meshlet1_local_indices = vec![
-        0, 1, 2,  2, 3, 0, // Передняя грань
-        1, 5, 6,  6, 2, 1, // Правая грань  
-        4, 5, 1,  1, 0, 4, // Нижняя грань  
+        0, 1, 2,  2, 3, 0, // Передняя грань (глобальные 0, 1, 2, 2, 3, 0)
+        1, 5, 6,  6, 2, 1, // Правая грань   (глобальные 1, 5, 6, 6, 2, 1)
+        4, 5, 1,  1, 0, 4, // Нижняя грань   (глобальные 4, 5, 1, 1, 0, 4)
     ];
 
-    // ==========================================
+    // =========================================================================
     // МЕШЛЕТ 2: Задняя, Левая и Верхняя грани (6 треугольников = 18 индексов)
-    let meshlet2_redirect = vec![0, 2, 3, 4, 5, 6, 7];
+    // Содержит уникальные вершины: 0, 1, 2, 3, 4, 5, 6, 7
+    let meshlet2_redirect = vec![0, 1, 2, 3, 4, 5, 6, 7];
+    
+    // Локальные индексы строятся СТРОГО по позициям в meshlet2_redirect:
     let meshlet2_local_indices = vec![
-        6, 5, 4,  4, 3, 6, // Задняя грань
-        3, 0, 2,  2, 6, 3, // Левая грань 
-        2, 1, 5,  5, 6, 2, // Верхняя грань
+        6, 5, 4,  4, 7, 6, // Задняя грань  (глобальные 6, 5, 4, 4, 7, 6)
+        3, 0, 4,  4, 7, 3, // Левая грань   (глобальные 3, 0, 4, 4, 7, 3)
+        2, 1, 5,  5, 6, 2, // Верхняя грань  (глобальные 2, 1, 5, 5, 6, 2)
     ];
 
     // Объединяем локальные данные мешлетов в глобальные массивы для GPU
@@ -131,20 +137,17 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         base_vertex: 0,
     }];
 
-
-    // Вместо (0..18) делаем большой сквозной буфер-шаблон на CPU
-// С запасом, например, на 10 000 мешлетов (180 000 индексов), памяти это почти не занимает
-    let max_theoretical_indices = 200_000;
-    let dummy_indices_template: Vec<u32> = (0..max_theoretical_indices).collect();
-
-    // Передаем этот большой вектор в queue.write_buffer(&self.index_buffer, ...)
-
+    // КРИТИЧЕСКИЙ ОПТИМИЗАЦИОННЫЙ ФИКС:
+    // Поскольку `index_count` в непрямой команде для мешлета куба равен 18,
+    // видеокарта аппаратно считывает индексы от 0 до 17 для каждого мешлета.
+    // Шаблона на 18 элементов [0, 1, 2, ..., 17] абсолютно достаточно для всей сцены!
+    let dummy_indices_template: Vec<u32> = (0..18).collect();
 
     let mut instances = Vec::new();
-
     for i in 0..num_instances {
-        let position = Vec3::new((i as f32) * 2.5, 0.0, -5.0);
-        let model_matrix = Mat4::from_translation(position);
+        // Расставляем кубы в ряд по оси X
+        let position = glam::Vec3::new((i as f32) * 2.5, 0.0, -5.0);
+        let model_matrix = glam::Mat4::from_translation(position);
 
         instances.push(InstanceData {
             model_matrix: model_matrix.to_cols_array_2d(),
@@ -153,7 +156,7 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
             joints_offset: 0,
             material_index: 0,
             primitive_index: 0, // Указывает на куб (mesh_infos[0])
-            pad0: 0,  // Больше не используется для жесткой адресации команд, можно занулить
+            pad0: 0, 
             pad1: 0, 
             pad2: 0,
             aabb_min: [-0.5, -0.5, -0.5],
@@ -179,8 +182,6 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         meshlet_vertex_redirect,          
         instances,
         culling_tasks,
-        // Поле indirect_commands убрано из TestSceneData, так как буфер теперь 
-        // создается пустым на GPU и заполняется исключительно Compute-шейдером.
     }
 }
 

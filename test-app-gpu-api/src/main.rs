@@ -227,7 +227,7 @@ async fn run() {
 
     let static_test_scene = generate_static_test_data(100);
     
-    let mut static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, &init_data);
+    let mut static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &init_data, model_depth_stencil_state);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -842,13 +842,9 @@ async fn run() {
                                     transform: Mat4::IDENTITY,
                                 });
                             }
-
-                            let frame_idx = static_bindless_resources.frame_index % NUM_FRAMES_IN_FLIGHT;
-                            let frame_res = &static_bindless_resources.frame_resources[frame_idx];
-
                             
-                            static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);                            
-                            static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder, frame_res);
+                            static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
+                            static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -856,7 +852,7 @@ async fn run() {
                                     timestamp_writes: None,
                                 });
 
-                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, frame_res, 100);
+                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, 100);
                             }
 
                             model_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &global_instances, &init_data.nodes,
@@ -909,8 +905,8 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, frame_res);
-                                static_bindless_resources.frame_index +=1;
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass);
+                                static_bindless_resources.advance_frame();
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
