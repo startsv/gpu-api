@@ -23,65 +23,64 @@ struct CameraUniform {
     padding: u32,    
     view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
-}
-
-struct StaticVertex {    
-    position: vec3<f32>,
-    pad0: f32,
-    uv: vec2<f32>,
-    pad1: vec2<f32>,
-    normal: vec3<f32>,
-    pad2: f32,
-    tangent: vec3<f32>,
-    pad3: f32,
-    bitangent: vec3<f32>,
-    pad4: f32,
-}
+};
+@group(1) @binding(0) var<uniform> camera: CameraUniform;
 
 struct NodeData {
     info: vec4<u32>,
     transform: mat4x4<f32>,
-}
-
-struct MeshInfo {
-    start_meshlet_index: u32,
-    meshlet_count: u32,
-    vertex_buffer_offset: u32,
-    base_vertex: i32,
-}
+};
+@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
+@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
 
 struct InstanceData {
     model_matrix: mat4x4<f32>,
+    
     is_animated: u32,
     node_index: u32,
     joints_offset: u32,
     material_index: u32,
-    primitive_index: u32, 
-    base_command_id: u32, 
-    pad1: u32,
-    pad2: u32,
-    aabb_min: vec3<f32>,
-    pad_aabb1: u32,
-    aabb_max: vec3<f32>,
-    pad_aabb2: u32,
-}
-
-struct StaticMeshletDescription {
-    aabb_min: vec3<f32>,
-    vertex_offset: u32,  
-    aabb_max: vec3<f32>,
-    index_offset: u32,   
-    index_count: u32,    
-    material_index: u32,
+    primitive_index: u32,
+    
     pad0: u32,
     pad1: u32,
-}
+    pad2: u32,
+    
+    aabb_min: vec3<f32>,
+    pad_aabb1: u32,
+    
+    aabb_max: vec3<f32>,
+    pad_aabb2: u32,
+};
+@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 
-struct VisibleInstanceData {
-    instance_id: u32,
+// --- Новые буферы для Мешлетов ---
+struct VisibleMeshletData {
+    meshlet_id: u32,
     material_index: u32,
-    meshlet_index: u32, 
-}
+};
+@group(2) @binding(3) var<storage, read> visible_meshlets: array<VisibleMeshletData>;
+
+struct Meshlet {
+    vertex_offset: u32,
+    vertex_count: u32,
+    index_offset: u32,
+    triangle_count: u32,
+    instance_id: u32, 
+};
+@group(2) @binding(4) var<storage, read> global_meshlets: array<Meshlet>;
+
+// Входные данные вершины остаются прежними (если вы используете стандартный Vertex Buffer).
+// Благодаря base_vertex в indirect-команде, vertex_input.position придет уже правильной для мешлета.
+struct VertexInput {    
+    @location(0) position: vec3<f32>,    
+    @location(1) uv: vec2<f32>,
+    @location(2) normal: vec3<f32>,
+    @location(3) tangent: vec3<f32>,
+    @location(4) bitangent: vec3<f32>,
+    @location(5) joints: vec4<u32>,
+    @location(6) weights: vec4<f32>
+};
 
 struct FragmentInput {
     @builtin(position) clip_position: vec4<f32>,
@@ -91,93 +90,96 @@ struct FragmentInput {
     @location(3) bitangent: vec3<f32>,
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) material_index: u32, 
+};
+
+fn read_baked_matrix(matrix_index: u32) -> mat4x4<f32> {
+    let texture_width: u32 = 2048u;
+    let matrices_per_row: u32 = 512u;
+
+    let row = matrix_index / matrices_per_row;
+    let col_matrix_offset = (matrix_index % matrices_per_row) * 4u;
+
+    let y = i32(row);
+    let x = i32(col_matrix_offset);
+    
+    let row0 = textureLoad(global_joint_texture, vec2<i32>(x + 0, y), 0);
+    let row1 = textureLoad(global_joint_texture, vec2<i32>(x + 1, y), 0);
+    let row2 = textureLoad(global_joint_texture, vec2<i32>(x + 2, y), 0);
+    let row3 = textureLoad(global_joint_texture, vec2<i32>(x + 3, y), 0);
+
+    return mat4x4<f32>(row0, row1, row2, row3);
 }
-
-// =====================================================================
-// ГРУППА 0: СТАТИЧЕСКАЯ ГЛОБАЛЬНАЯ ГРУППА МАТЕРИАЛОВ (materials_bind_group)
-// =====================================================================
-// Здесь при необходимости могут быть массивы текстур или глобальные параметры материалов
-// Для примера оставим пустое место или заглушку, соответствующую set_bind_group(0)
-
-// =====================================================================
-// ГРУППА 1: МОНОЛИТНАЯ КАДРОВАЯ ГРУППА (Соответствует render_bind_group на Rust)
-// Нарезана через Buffer Slices. Драйвер GPU автоматически смещает массивы к 0-му индексу.
-// =====================================================================
-@group(1) @binding(0) var<uniform> camera: CameraUniform;
-@group(1) @binding(1) var<storage, read> static_vertices: array<StaticVertex>;
-@group(1) @binding(2) var<storage, read> global_nodes: array<NodeData>;
-@group(1) @binding(3) var<storage, read> global_instances: array<InstanceData>;
-@group(1) @binding(4) var<storage, read> global_mesh_infos: array<MeshInfo>;
-
-// Выходные данные из Compute-пасса куллинга текущего кадра
-@group(1) @binding(5) var<storage, read> visible_instances: array<VisibleInstanceData>;
-
-// Тяжелые неизменяемые массивы мешлет-архитектуры сцены
-@group(1) @binding(6) var<storage, read> global_meshlets: array<StaticMeshletDescription>;
-@group(1) @binding(7) var<storage, read> meshlet_local_indices: array<u32>;
-@group(1) @binding(8) var<storage, read> meshlet_vertex_redirect: array<u32>;
 
 @vertex
 fn vs_main(
-    // Благодаря set_index_buffer(index_buffer.slice(..)) на Rust, 
-    // этот ID аппаратно считывается как последовательность [0, 1, 2, 3...]
-    @builtin(vertex_index) vertex_id: u32,
-    // Наш уникальный виртуальный ID, проброшенный через cmd.first_instance из Compute-пасса
-    @builtin(instance_index) cmd_id: u32
+    vertex_input: VertexInput, 
+    @builtin(instance_index) draw_meshlet_idx: u32 // Теперь указывает на индекс в visible_meshlets
 ) -> FragmentInput {    
+    // 1. Получаем данные о текущем мешлете
+    let render_data = visible_meshlets[draw_meshlet_idx];
+    let meshlet = global_meshlets[render_data.meshlet_id];
     
-    // 1. Получаем метаданные отрисовки для текущего видимого мешлета
-    let render_data = visible_instances[cmd_id];
+    // 2. Достаем инстанс, привязанный к мешлету (вместо render_data.instance_id)
+    let instance = global_instances[meshlet.instance_id];
+    var model_matrix = instance.model_matrix;
+    let node = global_nodes[instance.node_index];
     
-    let instance = global_instances[render_data.instance_id];
-    let meshlet = global_meshlets[render_data.meshlet_index];
-    let mesh_info = global_mesh_infos[instance.primitive_index];
+    // 3. Анимация (остается без изменений, так как кости привязаны к вершинам геометрии инстанса)
+    if (instance.is_animated == 1u) {
+        if (node.info[0] == 1u) {
+            model_matrix = model_matrix * node.transform;
+        } else {
+            let j0 = instance.joints_offset + vertex_input.joints[0];
+            let j1 = instance.joints_offset + vertex_input.joints[1];
+            let j2 = instance.joints_offset + vertex_input.joints[2];
+            let j3 = instance.joints_offset + vertex_input.joints[3];
+
+            let m0 = read_baked_matrix(j0);
+            let m1 = read_baked_matrix(j1);
+            let m2 = read_baked_matrix(j2);
+            let m3 = read_baked_matrix(j3);
+
+            var skin_matrix: mat4x4<f32> = 
+                vertex_input.weights[0] * m0 + 
+                vertex_input.weights[1] * m1 + 
+                vertex_input.weights[2] * m2 + 
+                vertex_input.weights[3] * m3;
+
+            model_matrix = model_matrix * skin_matrix * node.transform;            
+        }        
+    } else {
+        model_matrix = model_matrix * node.transform;
+    }
+
+    let model_position = model_matrix * vec4<f32>(vertex_input.position, 1.0);
     
-    // 2. Вычисляем локальный индекс вершины внутри мешлета (в пределах от 0 до 17)
-    // Так как буфер индексов сквозной, мы просто берем оффсет текущего мешлета
-    let local_index_address = meshlet.index_offset + vertex_id;
-    let local_vertex_id = meshlet_local_indices[local_index_address];
-    
-    // 3. Перенаправляем локальный индекс на реальный индекс вершины в базовом кубе
-    let redirect_address = meshlet.vertex_offset + local_vertex_id;
-    let actual_vertex_id = meshlet_vertex_redirect[redirect_address];
-    
-    // 4. С учетом оффсета конкретного меша, получаем финальный индекс в глобальном буфере вершин
-    // Для нашего куба mesh_info.vertex_buffer_offset равен 0.
-    let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
-    let vertex = static_vertices[global_vertex_idx];
-    
-    // 5. Трансформация геометрии
-    let model_matrix = instance.model_matrix;
-    let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
-    
-    // 6. Формирование выходных данных для фрагментного шейдера
     var out: FragmentInput;
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
-    out.uv = vertex.uv;
-    out.material_index = instance.material_index; 
-    
-    // Корректный перенос нормалей, тангенсов и битангенсов в мировое пространство
+    out.uv = vertex_input.uv;
+    out.material_index = render_data.material_index; 
+        
     let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
-    out.normal = normalize(normal_matrix * vertex.normal);
-    out.tangent = normalize(normal_matrix * vertex.tangent);
-    out.bitangent = normalize(normal_matrix * vertex.bitangent);
+    out.normal = normalize(normal_matrix * vertex_input.normal);
+    out.tangent = normalize(normal_matrix * vertex_input.tangent);
+    out.bitangent = normalize(normal_matrix * vertex_input.bitangent);
     
-    return out;
+    return out;    
 }
 
 @fragment
 fn fs_main(in: FragmentInput) -> @location(0) vec4<f32> {    
+    //return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    
     let mat_idx = in.material_index;
     let factors = global_materials[mat_idx];
-        
+    
     let base_color = textureSample(
         base_color_textures[mat_idx], 
         base_color_samplers[mat_idx], 
         in.uv
     ) * factors.base_color_factor;
-    
+
     let normal_map = textureSample(
         normal_textures[mat_idx], 
         normal_samplers[mat_idx], 
@@ -189,6 +191,6 @@ fn fs_main(in: FragmentInput) -> @location(0) vec4<f32> {
         metallic_roughness_samplers[mat_idx], 
         in.uv
     );    
-    
+
     return base_color;
 }

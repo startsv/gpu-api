@@ -1,17 +1,196 @@
 use glam::{Mat4, Vec3};
-use gpu_api::pipeline::{aa_line_pipeline::AaLineInstance, static_bindless_pipeline::{InstanceData, MeshInfo, StaticMeshletDescription}};
-use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, StaticVertex, SurfaceData, SurfaceMeshletDescription, SurfaceVertex}; // Используем вашу математическую библиотеку (скорее всего glam)
+use gpu_api::pipeline::{aa_line_pipeline::AaLineInstance, static_bindless_pipeline::MeshletData};
+use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, InstanceData, StaticVertex, SurfaceData, SurfaceMeshletDescription, SurfaceVertex, Vertex}; // Используем вашу математическую библиотеку (скорее всего glam)
 
-pub struct TestSceneData {
-    pub vertices: Vec<StaticVertex>,
-    pub indices: Vec<u32>,
-    pub meshlets: Vec<StaticMeshletDescription>,
-    pub mesh_infos: Vec<MeshInfo>,
-    pub meshlet_vertex_redirect: Vec<u32>,
-    pub meshlet_local_indices: Vec<u32>,
-    pub instances: Vec<InstanceData>,    
-    pub culling_tasks: Vec<CullingTask>,
+// Хелпер для хранения метаданных уникального меша до создания инстансов
+pub struct GeneratedMeshAsset {
+    pub start_meshlet_index: u32,
+    pub meshlet_count: u32,
 }
+
+/// Спавнит заданное количество инстансов, случайно выбирая для них одну из N уникальных моделей,
+/// и формирует финальные буферы для отправки на GPU.
+pub fn build_test_scene(
+    mesh_assets: &[GeneratedMeshAsset],
+    base_meshlets: &[MeshletData],
+    instances_count: u32,
+) -> (Vec<InstanceData>, Vec<CullingTask>, Vec<MeshletData>) {
+    let mut instances = Vec::new();
+    let mut culling_tasks = Vec::new();
+    let mut scene_global_meshlets = Vec::new();
+
+    // Зададим шаг сетки для расстановки инстансов в пространстве
+    let grid_size = (instances_count as f32).sqrt().ceil() as i32;
+    let spacing = 4.0f32;
+
+    for i in 0..instances_count {
+        let instance_id = i;
+        
+        // Выбираем для этого инстанса один из 10 уникальных мешей по кругу (или псевдорандомно)
+        let asset_idx = (i % mesh_assets.len() as u32) as usize;
+        let asset = &mesh_assets[asset_idx];
+
+        // Рассчитываем мировую позицию инстанса на сетке XZ
+        let x_pos = (i as i32 % grid_size) as f32 * spacing;
+        let z_pos = (i as i32 / grid_size) as f32 * spacing;
+        
+        let model_matrix = Mat4::from_translation(Vec3::new(x_pos, 0.0, z_pos));
+
+        // 1. Создаем InstanceData объекта
+        instances.push(InstanceData {
+            model_matrix,
+            is_animated: 0,
+            node_index: 0,      // В тестах нода идентична инстансу (identity transform)
+            joints_offset: 0,
+            material_index: asset_idx as u32, // Зададим уникальный материал для каждой модели
+            primitive_index: asset_idx as u32,
+            _pad0: 0, _pad1: 0, _pad2: 0,
+            aabb_min: [-1.0, -1.0, -1.0], // Грубый AABB инстанса
+            _pad_aabb1: 0,
+            aabb_max: [1.0, 1.0, 1.0],
+            _pad_aabb2: 0,
+        });
+
+        // 2. Дублируем мешлеты этой модели для текущего инстанса
+        // Так как куллинг идет поштучно по мешлетам, каждый инстанцированный мешлет
+        // должен знать свой уникальный `instance_id`, чтобы применить правильную матрицу трансформации.
+        let scene_start_meshlet_index = scene_global_meshlets.len() as u32;
+
+        for m_idx in 0..asset.meshlet_count {
+            let base_meshlet = base_meshlets[(asset.start_meshlet_index + m_idx) as usize];
+            
+            let mut instance_meshlet = base_meshlet;
+            instance_meshlet.instance_id = instance_id; // Важнейшая связь: мешлет -> инстанс
+            
+            scene_global_meshlets.push(instance_meshlet);
+        }
+
+        // 3. Создаем CullingTask для этого инстанса
+        // Поток GPU возьмет эту задачу и обработает пачку мешлетов конкретно этого инстанса
+        culling_tasks.push(CullingTask {
+            start_object_index: scene_start_meshlet_index,
+            object_count: asset.meshlet_count,
+            lod_level: 0,
+            _padding: 0,
+        });
+    }
+
+    (instances, culling_tasks, scene_global_meshlets)
+}
+
+
+/// Генерирует N уникальных моделей (сеток) в один набор буферов
+pub fn generate_unique_mesh_assets(
+    object_count: u32,
+) -> (Vec<Vertex>, Vec<u32>, Vec<MeshletData>, Vec<GeneratedMeshAsset>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut global_meshlets = Vec::new();
+    let mut mesh_assets = Vec::new();
+
+    for obj_id in 0..object_count {
+        let start_meshlet_index = global_meshlets.len() as u32;
+        
+        // Делаем каждый объект уникальным: меняем размер и плотность сетки в зависимости от obj_id
+        let segments = 4 + (obj_id * 2); // От 4x4 до более плотных сеток
+        let size = 1.0 + (obj_id as f32 * 0.5); // Разные физические размеры объектов
+        let base_vertex_offset = vertices.len() as u32;
+
+        let mut current_meshlet_indices = Vec::new();
+        let triangles_per_meshlet = 32;
+
+        // Генерация вершин уникального объекта
+        for z in 0..=segments {
+            for x in 0..=segments {
+                let x_frac = x as f32 / segments as f32;
+                let z_frac = z as f32 / segments as f32;
+                
+                let pos = Vec3::new((x_frac - 0.5) * size, 0.0, (z_frac - 0.5) * size);
+
+                vertices.push(Vertex {
+                    position: pos.to_array(),
+                    uv: [x_frac, z_frac],
+                    normal: [0.0, 1.0, 0.0],
+                    tangent: [1.0, 0.0, 0.0],
+                    bitangent: [0.0, 0.0, 1.0],
+                    joints: [0; 4],
+                    weights: [1.0, 0.0, 0.0, 0.0],
+                });
+            }
+        }
+
+        // Генерация треугольников объекта
+        for z in 0..segments {
+            for x in 0..segments {
+                let row_length = segments + 1;
+                let i0 = base_vertex_offset + (z * row_length + x);
+                let i1 = base_vertex_offset + (z * row_length + (x + 1));
+                let i2 = base_vertex_offset + ((z + 1) * row_length + x);
+                let i3 = base_vertex_offset + ((z + 1) * row_length + (x + 1));
+
+                current_meshlet_indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+
+                if current_meshlet_indices.len() / 3 >= triangles_per_meshlet {
+                    flush_test_meshlet(&current_meshlet_indices, &vertices, &mut indices, &mut global_meshlets);
+                    current_meshlet_indices.clear();
+                }
+            }
+        }
+
+        if !current_meshlet_indices.is_empty() {
+            flush_test_meshlet(&current_meshlet_indices, &vertices, &mut indices, &mut global_meshlets);
+        }
+
+        let meshlet_count = global_meshlets.len() as u32 - start_meshlet_index;
+        
+        mesh_assets.push(GeneratedMeshAsset {
+            start_meshlet_index,
+            meshlet_count,
+        });
+    }
+
+    (vertices, indices, global_meshlets, mesh_assets)
+}
+
+fn flush_test_meshlet(
+    meshlet_indices: &[u32],
+    vertices: &[Vertex],
+    mega_index_buffer: &mut Vec<u32>,
+    global_meshlets: &mut Vec<MeshletData>,
+) {
+    let index_offset = mega_index_buffer.len() as u32;
+    mega_index_buffer.extend_from_slice(meshlet_indices);
+
+    // Считаем локальный AABB и сферу куллинга мешлета
+    let mut min_bound = Vec3::splat(f32::INFINITY);
+    let mut max_bound = Vec3::splat(f32::NEG_INFINITY);
+    for &idx in meshlet_indices {
+        let pos = Vec3::from_array(vertices[idx as usize].position);
+        min_bound = min_bound.min(pos);
+        max_bound = max_bound.max(pos);
+    }
+    let bounding_center = (min_bound + max_bound) * 0.5;
+
+    let mut bounding_radius = 0.0f32;
+    for &idx in meshlet_indices {
+        let pos = Vec3::from_array(vertices[idx as usize].position);
+        bounding_radius = bounding_radius.max(pos.distance(bounding_center));
+    }
+
+    global_meshlets.push(MeshletData {
+        vertex_offset: 0, 
+        vertex_count: 0,
+        index_offset,
+        triangle_count: (meshlet_indices.len() / 3) as u32,
+        instance_id: 0, // Будет динамически переназначено при создании инстансов!
+        bounding_center_x: bounding_center.x,
+        bounding_center_y: bounding_center.y,
+        bounding_center_z: bounding_center.z,
+        bounding_radius,
+        _pad0: 0, _pad1: 0, _pad2: 0,
+    });
+}
+
 
 pub fn generate_grid(
     lines: &mut Vec<AaLineInstance>, 
@@ -53,135 +232,6 @@ pub fn generate_grid(
             start_pos: [-half_size, 0.0, current_coord],
             end_pos:   [half_size, 0.0, current_coord],
         });
-    }
-}
-
-pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
-    // 1. Геометрия стандартного куба (8 уникальных вершин)
-    let vertices = vec![
-        StaticVertex { position: [-0.5, -0.5,  0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 0
-        StaticVertex { position: [ 0.5, -0.5,  0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 1
-        StaticVertex { position: [ 0.5,  0.5,  0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 2
-        StaticVertex { position: [-0.5,  0.5,  0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, 1.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 3
-        StaticVertex { position: [-0.5, -0.5, -0.5], uv: [1.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 4
-        StaticVertex { position: [ 0.5, -0.5, -0.5], uv: [0.0, 0.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 5
-        StaticVertex { position: [ 0.5,  0.5, -0.5], uv: [0.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 6
-        StaticVertex { position: [-0.5,  0.5, -0.5], uv: [1.0, 1.0], normal: [0.0, 0.0, -1.0], tangent: [-1.0, 0.0, 0.0], bitangent: [0.0, 1.0, 0.0], ..Default::default() }, // 7
-    ];
-
-    // =========================================================================
-    // МЕШЛЕТ 1: Передняя, Правая и Нижняя грани (6 треугольников = 18 индексов)
-    // Содержит уникальные вершины: 0, 1, 2, 3, 4, 5, 6
-    let meshlet1_redirect = vec![0, 1, 2, 3, 4, 5, 6]; 
-    
-    // Маппинг глобальных вершин на индексы в redirect массиве:
-    let meshlet1_local_indices = vec![
-        0, 1, 2,  2, 3, 0, // Передняя грань (глобальные 0, 1, 2, 2, 3, 0)
-        1, 5, 6,  6, 2, 1, // Правая грань   (глобальные 1, 5, 6, 6, 2, 1)
-        4, 5, 1,  1, 0, 4, // Нижняя грань   (глобальные 4, 5, 1, 1, 0, 4)
-    ];
-
-    // =========================================================================
-    // МЕШЛЕТ 2: Задняя, Левая и Верхняя грани (6 треугольников = 18 индексов)
-    // Содержит уникальные вершины: 0, 1, 2, 3, 4, 5, 6, 7
-    let meshlet2_redirect = vec![0, 1, 2, 3, 4, 5, 6, 7];
-    
-    // Локальные индексы строятся СТРОГО по позициям в meshlet2_redirect:
-    let meshlet2_local_indices = vec![
-        6, 5, 4,  4, 7, 6, // Задняя грань  (глобальные 6, 5, 4, 4, 7, 6)
-        3, 0, 4,  4, 7, 3, // Левая грань   (глобальные 3, 0, 4, 4, 7, 3)
-        2, 1, 5,  5, 6, 2, // Верхняя грань  (глобальные 2, 1, 5, 5, 6, 2)
-    ];
-
-    // Объединяем локальные данные мешлетов в глобальные массивы для GPU
-    let mut meshlet_vertex_redirect = Vec::new();
-    let mut meshlet_local_indices = Vec::new();
-
-    let m1_vertex_offset = meshlet_vertex_redirect.len() as u32;
-    meshlet_vertex_redirect.extend(&meshlet1_redirect);
-    let m1_index_offset = meshlet_local_indices.len() as u32;
-    meshlet_local_indices.extend(&meshlet1_local_indices);
-
-    let m2_vertex_offset = meshlet_vertex_redirect.len() as u32;
-    meshlet_vertex_redirect.extend(&meshlet2_redirect);
-    let m2_index_offset = meshlet_local_indices.len() as u32;
-    meshlet_local_indices.extend(&meshlet2_local_indices);
-
-    // Описание мешлетов
-    let meshlets = vec![
-        StaticMeshletDescription {
-            aabb_min: [-0.5, -0.5, -0.5],
-            vertex_offset: m1_vertex_offset,
-            aabb_max: [0.5, 0.5, 0.5],
-            index_offset: m1_index_offset,
-            index_count: 18,
-            material_index: 0,
-            pad0: 0, pad1: 0,
-        },
-        StaticMeshletDescription {
-            aabb_min: [-0.5, -0.5, -0.5],
-            vertex_offset: m2_vertex_offset,
-            aabb_max: [0.5, 0.5, 0.5],
-            index_offset: m2_index_offset,
-            index_count: 18,
-            material_index: 0,
-            pad0: 0, pad1: 0,
-        },
-    ];
-
-    // Описываем базовый меш (Куб)
-    let mesh_infos = vec![MeshInfo {
-        start_meshlet_index: 0,
-        meshlet_count: 2, 
-        vertex_buffer_offset: 0,
-        base_vertex: 0,
-    }];
-
-    // КРИТИЧЕСКИЙ ОПТИМИЗАЦИОННЫЙ ФИКС:
-    // Поскольку `index_count` в непрямой команде для мешлета куба равен 18,
-    // видеокарта аппаратно считывает индексы от 0 до 17 для каждого мешлета.
-    // Шаблона на 18 элементов [0, 1, 2, ..., 17] абсолютно достаточно для всей сцены!
-    let dummy_indices_template: Vec<u32> = (0..18).collect();
-
-    let mut instances = Vec::new();
-    for i in 0..num_instances {
-        // Расставляем кубы в ряд по оси X
-        let position = glam::Vec3::new((i as f32) * 2.5, 0.0, -5.0);
-        let model_matrix = glam::Mat4::from_translation(position);
-
-        instances.push(InstanceData {
-            model_matrix: model_matrix.to_cols_array_2d(),
-            is_animated: 0,
-            node_index: 0,
-            joints_offset: 0,
-            material_index: 0,
-            primitive_index: 0, // Указывает на куб (mesh_infos[0])
-            pad0: 0, 
-            pad1: 0, 
-            pad2: 0,
-            aabb_min: [-0.5, -0.5, -0.5],
-            pad_aabb1: 0,
-            aabb_max: [0.5, 0.5, 0.5],
-            pad_aabb2: 0,
-        });
-    }
-
-    let culling_tasks = vec![CullingTask {
-        start_object_index: 0,
-        object_count: num_instances,
-        lod_level: 0,
-        _padding: 0,
-    }];
-
-    TestSceneData {
-        vertices,
-        indices: dummy_indices_template, 
-        meshlets,
-        mesh_infos,
-        meshlet_local_indices,           
-        meshlet_vertex_redirect,          
-        instances,
-        culling_tasks,
     }
 }
 

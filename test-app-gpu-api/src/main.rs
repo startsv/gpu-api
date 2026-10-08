@@ -9,11 +9,11 @@ use wgpu::{CurrentSurfaceTexture, DeviceDescriptor, ExperimentalFeatures, Memory
 use winit::{event_loop::EventLoopProxy, platform::web::{WindowExtWebSys, EventLoopExtWebSys}};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
-use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, static_bindless_pipeline::NUM_FRAMES_IN_FLIGHT, surface_bindless_pipeline::SurfaceBindlessResources}};
+use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
 
-use crate::test_data::{generate_grid, generate_static_test_data, generate_test_surface};
+use crate::test_data::{build_test_scene, generate_grid, generate_test_surface, generate_unique_mesh_assets};
 
 mod test_data;
 
@@ -223,11 +223,11 @@ async fn run() {
     let model_bindless_resources = pipeline::model_bindless_pipeline::ModelBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state.clone(),
         registered_primitives.len(),
         &mut init_data
-    );
-
-    let static_test_scene = generate_static_test_data(100);
+    );    
     
-    let mut static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &init_data, model_depth_stencil_state);
+    let static_num_instances = 10;
+
+    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, &mut init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -259,7 +259,12 @@ async fn run() {
    
     model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);    
 
-    static_bindless_resources.init(&queue, &static_test_scene.vertices, &static_test_scene.indices, &static_test_scene.meshlets, &static_test_scene.mesh_infos, &init_data.factors, &static_test_scene.meshlet_local_indices, &static_test_scene.meshlet_vertex_redirect);
+    
+    let (vertices, indices, base_meshlets, mesh_assets) = generate_unique_mesh_assets(3);
+    
+    let (static_instances, static_culling_tasks, static_scene_meshlets) = build_test_scene(&mesh_assets, &base_meshlets, static_num_instances as u32);
+
+    static_bindless_resources.init(&queue, &vertices, &indices, &init_data.factors, &static_scene_meshlets);
 
     object_group.objects.push(object);
 
@@ -843,8 +848,8 @@ async fn run() {
                                 });
                             }
                             
-                            static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
-                            static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder);
+                            static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_instances, &init_data.nodes, &static_culling_tasks);
+                            static_bindless_resources.clear_gpu_driven_frame(&mut encoder);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -905,8 +910,7 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass);
-                                static_bindless_resources.advance_frame();
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 200);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
