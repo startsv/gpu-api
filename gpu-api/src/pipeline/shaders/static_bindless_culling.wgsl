@@ -73,14 +73,14 @@ struct LocalTask {
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 
-@group(1) @binding(0) var<storage, read> culling_tasks: array<CullingTask>;
-@group(1) @binding(1) var<storage, read> global_instances: array<InstanceData>;
-@group(1) @binding(2) var<storage, read> global_mesh_infos: array<MeshInfo>;
-@group(1) @binding(3) var<storage, read> global_meshlets: array<StaticMeshletDescription>;
+@group(0) @binding(1) var<storage, read> culling_tasks: array<CullingTask>;
+@group(0) @binding(2) var<storage, read> global_instances: array<InstanceData>;
+@group(0) @binding(3) var<storage, read> global_mesh_infos: array<MeshInfo>;
+@group(0) @binding(4) var<storage, read> global_meshlets: array<StaticMeshletDescription>;
 
-@group(1) @binding(4) var<storage, read_write> visible_instances: array<VisibleInstanceData>;
-@group(1) @binding(5) var<storage, read_write> indirect_commands: array<DrawIndexedIndirectCommand>;
-@group(1) @binding(6) var<storage, read_write> command_counter: IndirectCount;
+@group(0) @binding(5) var<storage, read_write> visible_instances: array<VisibleInstanceData>;
+@group(0) @binding(6) var<storage, read_write> indirect_commands: array<DrawIndexedIndirectCommand>;
+@group(0) @binding(7) var<storage, read_write> command_counter: IndirectCount;
 
 // Локальная память рабочей группы (кэш на чипе)
 var<workgroup> wg_visible_count: atomic<u32>;

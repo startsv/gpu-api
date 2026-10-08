@@ -1,23 +1,20 @@
+use std::borrow::Cow;
 use wgpu::TextureFormat;
 use crate::pipeline::static_bindless_pipeline::static_bindless_layout::PipelineLayouts;
 
 pub fn create_pipelines(
     device: &wgpu::Device,
-    layouts: &PipelineLayouts,
-    culling_shader_src: &str,
-    render_shader_src: &str,    
+    layouts: &PipelineLayouts,    
     depth_stencil: Option<wgpu::DepthStencilState>
-) -> (wgpu::ComputePipeline, wgpu::RenderPipeline) {
-    
-    // 1. Компиляция шейдеров
+) -> (wgpu::ComputePipeline, wgpu::RenderPipeline) {        
     let culling_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Culling Compute Shader Module"),
-        source: wgpu::ShaderSource::Wgsl(culling_shader_src.into()),
-    });
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/static_bindless_culling.wgsl"))),
+    });    
 
     let render_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Meshlet Render Shader Module"),
-        source: wgpu::ShaderSource::Wgsl(render_shader_src.into()),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/static_bindless.wgsl"))),
     });
 
     // 2. Сборка Compute Пайплайна

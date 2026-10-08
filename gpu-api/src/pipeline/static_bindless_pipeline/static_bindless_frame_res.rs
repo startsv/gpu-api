@@ -37,9 +37,11 @@ impl FrameResources {
         // Layout'ы пайплайнов для сборки BindGroup
         culling_compute_layout: &wgpu::BindGroupLayout,
         render_bind_group_layout: &wgpu::BindGroupLayout,
+        geometry_buffer: &wgpu::Buffer, // <--- Добавлено!
         // Ссылки на 2 основных монолитных буфера, откуда нарезаются срезы
         scene_data_buffer: &wgpu::Buffer,
         frame_ring_buffer: &wgpu::Buffer,
+        vertex_range: &BufferRange,     // <--- Добавлено!
         // Глобальные статические диапазоны памяти сцены
         culling_tasks_range: &BufferRange,
         instances_range: &BufferRange,
@@ -50,67 +52,62 @@ impl FrameResources {
         meshlet_vertex_redirect_range: &BufferRange,
         // Массив просчитанных кадровых смещений (по одному на каждый NUM_FRAMES_IN_FLIGHT)
         frame_ranges: &[FrameResourceRanges],
-    ) -> Vec<Self> {
+    ) -> Vec<Self> {        
         let mut frame_resources = Vec::new();
 
         for i in 0..NUM_FRAMES_IN_FLIGHT {
             let ranges = &frame_ranges[i];
 
+            // =====================================================================
             // 1. Сборка монолитной Bind Group для Compute-пасса куллинга текущего кадра
+            // Всего 8 записей: binding(0) .. binding(7) -> Строго соответствует culling.wgsl
+            // =====================================================================
             let culling_compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("Culling Compute Bind Group Frame {}", i)),
                 layout: culling_compute_layout,
                 entries: &[                
-                    // Камера текущего кадра (Uniform срез из FrameRingBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 0, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
                         })
                     },
-                    // Статические задачи куллинга (Storage срез из SceneDataBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 1, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: culling_tasks_range.offset, size: wgpu::BufferSize::new(culling_tasks_range.size)
                         })
                     },                
-                    // Данные всех инстансов сцены (Storage срез из SceneDataBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 2, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: instances_range.offset, size: wgpu::BufferSize::new(instances_range.size)
                         })
                     },
-                    // Инфо о мешах (Storage срез из SceneDataBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 3, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: mesh_infos_range.offset, size: wgpu::BufferSize::new(mesh_infos_range.size)
                         })
                     },                
-                    // Описания всех мешлетов (Storage срез из SceneDataBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 4, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: meshlets_range.offset, size: wgpu::BufferSize::new(meshlets_range.size)
                         })
                     },
-                    // ВЫХОД: Индексы видимых мешлетов текущего кадра (Storage срез из FrameRingBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 5, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: frame_ring_buffer, offset: ranges.visible_instances.offset, size: wgpu::BufferSize::new(ranges.visible_instances.size)
                         })
                     },                
-                    // ВЫХОД: Буфер indirect команд отрисовки (Storage срез из FrameRingBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 6, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: frame_ring_buffer, offset: ranges.indirect.offset, size: wgpu::BufferSize::new(ranges.indirect.size)
                         })
                     },
-                    // ВЫХОД: Атомарный счетчик команд (Storage срез из FrameRingBuffer)
                     wgpu::BindGroupEntry { 
                         binding: 7, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -120,63 +117,74 @@ impl FrameResources {
                 ],
             });
 
-            // 2. Сборка монолитной Bind Group для графического Render-пайплайна текущего кадра
+            // =====================================================================
+            // 2. Сборка монолитной Bind Group для графического рендеринга текущего кадра
+            // Всего 9 записей: binding(0) .. binding(8) -> Строго соответствует render.wgsl
+            // =====================================================================
             let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("Render Bind Group Frame {}", i)),
                 layout: render_bind_group_layout,
                 entries: &[
-                    // Камера текущего кадра (Uniform срез из FrameRingBuffer)
+                    // binding(0): camera
                     wgpu::BindGroupEntry { 
                         binding: 0, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
                         })
                     },
-                    // Иерархия нод / трансформаций (Storage срез из SceneDataBuffer)
+                    // binding(1): static_vertices
                     wgpu::BindGroupEntry { 
                         binding: 1, 
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: geometry_buffer, offset: vertex_range.offset, size: wgpu::BufferSize::new(vertex_range.size)
+                        })
+                    },
+                    // binding(2): global_nodes
+                    wgpu::BindGroupEntry { 
+                        binding: 2, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: nodes_range.offset, size: wgpu::BufferSize::new(nodes_range.size)
                         })
                     },
-                    // Данные инстансов (Storage срез из SceneDataBuffer)
+                    // binding(3): global_instances
                     wgpu::BindGroupEntry { 
-                        binding: 2, 
+                        binding: 3, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: instances_range.offset, size: wgpu::BufferSize::new(instances_range.size)
                         })
                     },
-                    // Инфо о мешах (Storage срез из SceneDataBuffer)
+                    // binding(4): global_mesh_infos
                     wgpu::BindGroupEntry { 
-                        binding: 3, 
+                        binding: 4, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: mesh_infos_range.offset, size: wgpu::BufferSize::new(mesh_infos_range.size)
                         })
                     },
-                    // ВХОД ИЗ COMPUTE: Список отсеянных мешлетов (Storage срез из FrameRingBuffer)
+                    // binding(5): visible_instances (Вход из Compute)
                     wgpu::BindGroupEntry { 
-                        binding: 4, 
+                        binding: 5, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: frame_ring_buffer, offset: ranges.visible_instances.offset, size: wgpu::BufferSize::new(ranges.visible_instances.size)
                         })
                     },                
-                    // Все мешлеты сцены (Storage срез из SceneDataBuffer)
+                    // binding(6): global_meshlets
                     wgpu::BindGroupEntry { 
-                        binding: 5, 
+                        binding: 6, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: meshlets_range.offset, size: wgpu::BufferSize::new(meshlets_range.size)
                         })
                     },
-                    // Локальные индексы треугольников внутри мешлетов (Storage срез из SceneDataBuffer)
+                    // binding(7): meshlet_local_indices
                     wgpu::BindGroupEntry { 
-                        binding: 6, 
+                        binding: 7, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: meshlet_local_indices_range.offset, size: wgpu::BufferSize::new(meshlet_local_indices_range.size)
                         })
                     },
-                    // Таблица перенаправления вершин (Storage срез из SceneDataBuffer)
+                    // КРИТИЧЕСКИЙ ФИКС: binding(8) теперь на месте! 
+                    // meshlet_vertex_redirect замыкает цепочку распаковки
                     wgpu::BindGroupEntry { 
-                        binding: 7, 
+                        binding: 8, 
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: scene_data_buffer, offset: meshlet_vertex_redirect_range.offset, size: wgpu::BufferSize::new(meshlet_vertex_redirect_range.size)
                         })

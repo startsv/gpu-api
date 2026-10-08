@@ -8,12 +8,9 @@ use crate::{camera::CAMERA_UNIFORM_SIZE, pipeline::{model_pipeline::model::InitD
 impl StaticBindlessResources {
     pub fn new(device: &wgpu::Device, queue: &Queue, init_data: &InitData, depth_stencil: Option<wgpu::DepthStencilState>) -> Self {
         let max_meshlets_count = 200;
-        
+
         let layouts = PipelineLayouts::new(device);
-        let (culling_compute_pipeline, render_pipeline) = create_pipelines(device, &layouts,
-            "../shaders/static_bindless_culling.wgsl",
-            "../shaders/static_bindless.wgsl",
-        depth_stencil);
+        let (culling_compute_pipeline, render_pipeline) = create_pipelines(device, &layouts, depth_stencil);
 
         // =====================================================================
         // БУФЕР 1: StaticGeometryBuffer (Вершины + Индексы)
@@ -31,7 +28,7 @@ impl StaticBindlessResources {
         let geometry_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Static Geometry Buffer (Vertices & Indices)"),
             size: geom_offset,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
 
@@ -132,127 +129,7 @@ impl StaticBindlessResources {
         // =====================================================================
         // НАРЕЗКА СРЕЗОВ (BufferBinding) И ИНИЦИАЛИЗАЦИЯ BIND GROUPS КАДРОВ
         // =====================================================================
-        let mut frame_resources = Vec::new();
-
-        for i in 0..NUM_FRAMES_IN_FLIGHT {
-            let ranges = &frame_ranges[i];
-
-            // Нарезка кадровой группы для Compute-шейдера куллинга
-            let culling_compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Culling Compute Bind Group Frame {}", i)),
-                layout: &layouts.culling_compute_layout,
-                entries: &[                
-                    wgpu::BindGroupEntry { 
-                        binding: 0, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
-                        })
-                    },
-                    wgpu::BindGroupEntry { 
-                        binding: 1, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &scene_data_buffer, offset: culling_tasks_range.offset, size: wgpu::BufferSize::new(culling_tasks_range.size)
-                        })
-                    },                
-                    wgpu::BindGroupEntry { 
-                        binding: 2, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &scene_data_buffer, offset: instances_range.offset, size: wgpu::BufferSize::new(instances_range.size)
-                        })
-                    },
-                    wgpu::BindGroupEntry { 
-                        binding: 3, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &scene_data_buffer, offset: mesh_infos_range.offset, size: wgpu::BufferSize::new(mesh_infos_range.size)
-                        })
-                    },                
-                    wgpu::BindGroupEntry { 
-                        binding: 4, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &scene_data_buffer, offset: meshlets_range.offset, size: wgpu::BufferSize::new(meshlets_range.size)
-                        })
-                    },
-                    wgpu::BindGroupEntry { 
-                        binding: 5, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &frame_ring_buffer, offset: ranges.visible_instances.offset, size: wgpu::BufferSize::new(ranges.visible_instances.size)
-                        })
-                    },                
-                    wgpu::BindGroupEntry { 
-                        binding: 6, 
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &frame_ring_buffer, offset: ranges.indirect.offset, size: wgpu::BufferSize::new(ranges.indirect.size)
-                        })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &frame_ring_buffer, offset: ranges.counter.offset, size: wgpu::BufferSize::new(ranges.counter.size)
-                    })
-                    },
-                    ],
-                    });
-                    // Нарезка кадровой группы для графического Render-пайплайна
-                    let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("Render Bind Group Frame {}", i)),
-                    layout: &layouts.render_bind_group_layout,
-                    entries: &[
-                    wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &frame_ring_buffer, offset: ranges.camera.offset, size: wgpu::BufferSize::new(ranges.camera.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: nodes_range.offset, size: wgpu::BufferSize::new(nodes_range.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: instances_range.offset, size: wgpu::BufferSize::new(instances_range.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: mesh_infos_range.offset, size: wgpu::BufferSize::new(mesh_infos_range.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &frame_ring_buffer, offset: ranges.visible_instances.offset, size: wgpu::BufferSize::new(ranges.visible_instances.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: meshlets_range.offset, size: wgpu::BufferSize::new(meshlets_range.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: meshlet_local_indices_range.offset, size: wgpu::BufferSize::new(meshlet_local_indices_range.size)
-                    })
-                    },
-                    wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &scene_data_buffer, offset: meshlet_vertex_redirect_range.offset, size: wgpu::BufferSize::new(meshlet_vertex_redirect_range.size)
-                    })
-                    },
-                    ],
-            });
-
-            frame_resources.push(FrameResources {
-                culling_compute_bind_group,
-                render_bind_group,
-            });
-        }
+        let frame_resources = FrameResources::create(device, &layouts.culling_compute_layout, &layouts.render_bind_group_layout, &geometry_buffer, &scene_data_buffer, &frame_ring_buffer, &vertex_range, &culling_tasks_range, &instances_range, &mesh_infos_range, &meshlets_range, &nodes_range, &meshlet_local_indices_range, &meshlet_vertex_redirect_range, &frame_ranges);
 
         let dummy_size = wgpu::Extent3d {
             width: 1,
