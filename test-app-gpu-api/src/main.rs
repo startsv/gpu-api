@@ -9,7 +9,7 @@ use wgpu::{CurrentSurfaceTexture, DeviceDescriptor, ExperimentalFeatures, Memory
 use winit::{event_loop::EventLoopProxy, platform::web::{WindowExtWebSys, EventLoopExtWebSys}};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
-use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
+use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, static_bindless_pipeline::NUM_FRAMES_IN_FLIGHT, surface_bindless_pipeline::SurfaceBindlessResources}};
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
 
@@ -120,7 +120,7 @@ async fn run() {
         .expect("Surface isn't supported by the adapter.");
 
     config.present_mode = wgpu::PresentMode::Mailbox;
-    config.format = wgpu::TextureFormat::Rgba8Unorm;
+    config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
     config.view_formats.push(wgpu::TextureFormat::Rgba8UnormSrgb);    
 
     info!("{:#?}", config);
@@ -842,9 +842,13 @@ async fn run() {
                                     transform: Mat4::IDENTITY,
                                 });
                             }
+
+                            let frame_idx = static_bindless_resources.frame_index % NUM_FRAMES_IN_FLIGHT;
+                            let frame_res = &static_bindless_resources.frame_resources[frame_idx];
+
                             
                             static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);                            
-                            static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder);            
+                            static_bindless_resources.clear_gpu_driven_frame(&queue, &mut encoder, frame_res);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -852,7 +856,7 @@ async fn run() {
                                     timestamp_writes: None,
                                 });
 
-                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, 100);
+                                static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass, frame_res, 100);
                             }
 
                             model_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &global_instances, &init_data.nodes,
@@ -905,7 +909,8 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass);
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, frame_res);
+                                static_bindless_resources.frame_index +=1;
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
@@ -919,7 +924,7 @@ async fn run() {
                             staging_belt.finish();
                             queue.submit(Some(encoder.finish()));
                             queue.present(frame);
-                            staging_belt.recall();
+                            staging_belt.recall();                            
                         }
 
                         window.request_redraw();
