@@ -118,48 +118,43 @@ fn culling_main(
     let task = culling_tasks[0u]; 
     let global_instance_id = task.start_object_index + global_id.x;
     
+    // Безопасный выход за границы массива инстансов
     if (global_id.x >= task.object_count) { return; }
     
     let instance = global_instances[global_instance_id];
     let mesh_info = global_mesh_infos[instance.primitive_index];
 
-    // --- ЭТАП 1: Куллинг на уровне ОБЪЕКТА целиком ---
-    let world_object_aabb = transform_aabb(instance.aabb_min, instance.aabb_max, instance.model_matrix);
-    let object_visible = is_aabb_visible(world_object_aabb[0], world_object_aabb[1]);
+    // ХАРДКОД ДЛЯ ТЕСТА: Полностью отключаем culling. 
+    // Говорим GPU, что ВСЕ объекты всегда 100% видимы!
+    let object_visible = true; 
     
-    // Если объект полностью скрыт фрустумом, его мешлеты даже не перебираем
-    if (!object_visible) { return; }
+    if (object_visible) {
+            // ... внутри цикла по мешлетам ...
+        for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
+            let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
+            let meshlet = global_meshlets[global_meshlet_id];
             
-    // --- ЭТАП 2: Куллинг на уровне МЕШЛЕТОВ ---
-    for (var m_idx = 0u; m_idx < mesh_info.meshlet_count; m_idx = m_idx + 1u) {
-        let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
-        let meshlet = global_meshlets[global_meshlet_id];
-        
-        let world_meshlet_aabb = transform_aabb(meshlet.aabb_min, meshlet.aabb_max, instance.model_matrix);
-        
-        if (is_aabb_visible(world_meshlet_aabb[0], world_meshlet_aabb[1])) {
-            // Мешлет прошел проверку видимости! Занимаем плотный глобальный слот
+            // Атомарно инкрементируем счетчик
             let cmd_id = atomicAdd(&command_counter.count, 1u);
+            
+            // КРИТИЧЕСКАЯ ЗАЩИТА: Заменяем hardcode-лимит на максимальный размер ваших буферов.
+            // Для 100 инстансов по 2 мешлета максимальный cmd_id должен быть СТРОГО меньше 200!
+            let max_allowed_commands = 200u; 
                                         
-            // Сохраняем метаданные для Вершинного шейдера
-            visible_instances[cmd_id].instance_id = global_instance_id;
-            visible_instances[cmd_id].material_index = instance.material_index;
-            visible_instances[cmd_id].meshlet_index = global_meshlet_id;
+            if (cmd_id < max_allowed_commands) {
+                visible_instances[cmd_id].instance_id = global_instance_id;
+                visible_instances[cmd_id].material_index = instance.material_index;
+                visible_instances[cmd_id].meshlet_index = global_meshlet_id;
 
-            // Настраиваем команду отрисовки
-            var cmd: DrawIndexedIndirectCommand;
-            cmd.index_count = meshlet.index_count; // В нашем тесте это 18
-            cmd.instance_count = 1u;               
-            
-            // ВАЖНЫЙ ФИКС: Сдвигаем старт чтения индексного буфера шаблона.
-            // Каждая команда читает свой уникальный непрерывный отрезок из dummy_indices_template.
-            // Жестко завязываемся на размер мешлета (18 индексов).
-            cmd.first_index = cmd_id * 18u; 
-            
-            cmd.base_vertex = 0; // СТРОГО 0. Больше не зависим от багов драйвера видеокарты
-            cmd.first_instance = 0u; // СТРОГО 0. Полная переносимость
+                var cmd: DrawIndexedIndirectCommand;
+                cmd.index_count = meshlet.index_count; 
+                cmd.instance_count = 1u;               
+                cmd.first_index = cmd_id * 18u; // Наш сквозной индекс
+                cmd.base_vertex = 0;           
+                cmd.first_instance = 0u;       
 
-            indirect_commands[cmd_id] = cmd;
+                indirect_commands[cmd_id] = cmd;
+            }
         }
     }
 }

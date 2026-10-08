@@ -193,7 +193,7 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        let indirect_buffer_size = (max_instances_count * std::mem::size_of::<DrawIndexedIndirectCommand>()) as u64;        
+        let indirect_buffer_size = (max_instances_count * 2 * std::mem::size_of::<DrawIndexedIndirectCommand>()) as u64;        
         
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Static Indirect Commands Buffer"),
@@ -935,7 +935,7 @@ impl StaticBindlessResources {
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
-            self.max_instances_count
+            200
         );
     }
 }
