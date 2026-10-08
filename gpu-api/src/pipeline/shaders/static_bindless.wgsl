@@ -116,11 +116,11 @@ struct FragmentInput {
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) vertex_id: u32,          // Чистый локальный индекс (от 0 до index_count - 1)
-    @builtin(instance_index) draw_instance_idx: u32 // Равен значению first_instance из indirect-команды
+    @builtin(vertex_index) vertex_id: u32,          // Локальный индекс внутри мешлета (0..17)
+    @builtin(instance_index) draw_instance_idx: u32 // Автоматически равен cmd_id из команды!
 ) -> FragmentInput {    
     
-    // Больше никаких битовых сдвигов! draw_instance_idx указывает прямо на элемент в visible_instances
+    // Прямой bindless доступ без масок и сдвигов
     let render_data = visible_instances[draw_instance_idx];
     
     let instance = global_instances[render_data.instance_id];
@@ -138,7 +138,7 @@ fn vs_main(
     let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     
-    // Математика трансформаций координат
+    // --- Математика трансформаций (model_matrix, view_proj и т.д.) ---
     let model_matrix = instance.model_matrix;
     let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     

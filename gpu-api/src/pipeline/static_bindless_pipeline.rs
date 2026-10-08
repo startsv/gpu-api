@@ -887,9 +887,13 @@ impl StaticBindlessResources {
     /// Очищает счетчик команд перед стадией куллинга.
     /// Заменяет старый тяжелый clear_gpu_driven_frame.
     pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {                
-        // Вместо копирования всего шаблона команд, мы просто сбрасываем атомарный счетчик в 0
+        // 1. Сбрасываем атомарный счетчик в 0
         encoder.clear_buffer(&self.command_counter_buffer, 0, None);      
+
+        // 2. Зануляем весь буфер indirect-команд, чтобы убрать хвосты прошлого кадра!
+        //encoder.clear_buffer(&self.indirect_commands_buffer, 0, None);
     }
+
 
     pub fn compute_gpu_driven_frame(
         &self,
@@ -918,7 +922,7 @@ impl StaticBindlessResources {
                 
         // Вариант 1: Использование нативного расширения Multi Draw Indirect Count (Рекомендуется для десктопа)
         // Для этого ваше WGPU Device должно быть создано с Feature::MULTI_DRAW_INDEXED_INDIRECT_COUNT
-        #[cfg(feature = "native_mdi_count")]
+        
         render_pass.multi_draw_indexed_indirect_count(
             &self.indirect_commands_buffer,
             0,
@@ -926,17 +930,19 @@ impl StaticBindlessResources {
             0,
             self.total_meshlets_commands_count, // Максимально возможный лимит
         );
+        
 
         // Вариант 2: Стандартный Multi Draw Indirect (Для WebGPU/Браузеров без расширений)
         // Раскомментируйте, если пишете под WebGPU. Железо обработает плотный буфер, 
         // но прочитает его до максимального теоретического лимита сцены. Внутри неинициализированных 
         // команд instance_count будет равен 0 (благодаря аллокации буфера с Wgpu::BufferUsages::COPY_DST/STORAGE и clear_buffer),
         // поэтому видеокарта мгновенно пропустит пустые хвосты.
-        #[cfg(not(feature = "native_mdi_count"))]
+        /*
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
             self.total_meshlets_commands_count
         );
+        */        
     }
 }
