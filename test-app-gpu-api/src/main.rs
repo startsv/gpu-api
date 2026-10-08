@@ -844,7 +844,7 @@ async fn run() {
                             }
                             
                             static_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &static_test_scene.instances, &init_data.nodes, &static_test_scene.culling_tasks);
-                            static_bindless_resources.clear_gpu_driven_frame(&queue);
+                            //static_bindless_resources.clear_gpu_driven_frame(&queue);
 
                             {
                                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
