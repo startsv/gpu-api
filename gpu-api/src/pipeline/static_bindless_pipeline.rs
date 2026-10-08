@@ -930,7 +930,7 @@ impl StaticBindlessResources {
         // команд instance_count будет равен 0 (благодаря аллокации буфера с Wgpu::BufferUsages::COPY_DST/STORAGE и clear_buffer),
         // поэтому видеокарта мгновенно пропустит пустые хвосты.
 
-        info!("Drawing {}", self.max_instances_count);
+        //info!("Drawing {}", self.max_instances_count);
 
         render_pass.multi_draw_indexed_indirect_count(
             &self.indirect_commands_buffer,
