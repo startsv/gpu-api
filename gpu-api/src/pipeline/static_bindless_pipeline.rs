@@ -889,7 +889,7 @@ impl StaticBindlessResources {
     /// Заменяет старый тяжелый clear_gpu_driven_frame.
     pub fn clear_gpu_driven_frame(&self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder) {
         let zero: [u32; 1] = [0];
-        queue.write_buffer(&self.command_counter_buffer, 0, bytemuck::cast_slice(&zero));
+        //queue.write_buffer(&self.command_counter_buffer, 0, bytemuck::cast_slice(&zero));
 
         // 1. Сбрасываем атомарный счетчик в 0
         //encoder.clear_buffer(&self.command_counter_buffer, 0, None);      

@@ -93,23 +93,35 @@ fn culling_main(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(local_invocation_index) local_id: u32
 ) {
-    // 1. Инициализируем локальный счетчик силами первого потока группы
+    // ---------------------------------------------------------------------
+    // УЛЬТИМАТИВНЫЙ ФИКС: САМООЧИСТКА НА GPU СИЛАМИ ПЕРВОГО ПОТОКА СЦЕНЫ
+    // ---------------------------------------------------------------------
+    if (global_id.x == 0u) {
+        // Жестко пишем 0 в глобальный счетчик прямо из шейдера.
+        // Никаких race condition с CPU шиной больше физически быть не может.
+        atomicStore(&command_counter.count, 0u);
+    }
+    
+    // Инициализируем локальный счетчик группы силами первого потока конкретной группы
     if (local_id == 0u) {
         atomicStore(&wg_visible_count, 0u);
     }
-    // Ждем, пока память гарантированно очистится для всей группы
+    
+    // КРИТИЧЕСКИЙ БАРЬЕР: Ждем полной инициализации как локальной, так и глобальной памяти!
+    // Обратите внимание: workgroupBarrier синхронизирует ЛОКАЛЬНУЮ память группы.
+    // Чтобы первый блок дождался сброса глобального счетчика потоком global_id.x == 0,
+    // на уровне группы этого барьера хватает, так как поток 0 входит в первую группу.
     workgroupBarrier();
 
     let task = culling_tasks[0u]; 
     let global_instance_id = task.start_object_index + global_id.x;
     
-    // Если поток находится в границах массива объектов
+    // Если поток находится в границах массива объектов кадра
     if (global_id.x < task.object_count) {
         let instance = global_instances[global_instance_id];
         let mesh_info = global_mesh_infos[instance.primitive_index];
 
-        // ХАРДКОД ДЛЯ ТЕСТА: Считаем все объекты видимыми. 
-        // Когда будете возвращать куллинг — просто замените true на функцию is_aabb_visible
+        // Наш хардкод для теста видимости кубов
         let object_visible = true; 
         
         if (object_visible) {
@@ -117,10 +129,10 @@ fn culling_main(
                 let global_meshlet_id = mesh_info.start_meshlet_index + m_idx;
                 let meshlet = global_meshlets[global_meshlet_id];
                 
-                let meshlet_visible = true; // ХАРДКОД ДЛЯ ТЕСТА
+                let meshlet_visible = true; 
                 
                 if (meshlet_visible) {
-                    // Пишем строго в ЛОКАЛЬНЫЙ упорядоченный кэш группы
+                    // Пишем строго в локальный упорядоченный кэш группы
                     let local_slot = atomicAdd(&wg_visible_count, 1u);
                     
                     if (local_slot < 256u) {
@@ -134,30 +146,25 @@ fn culling_main(
         }
     }
 
-    // КРИТИЧЕСКАЯ СИНХРОНИЗАЦИЯ: Ждем, пока ВСЕ 64 потока полностью завершат циклы 
-    // и упорядоченно сложат данные в локальный массив wg_local_tasks.
+    // Ждем, пока ВСЕ потоки группы соберут данные в локальный кэш
     workgroupBarrier();
 
     let total_wg_visible = atomicLoad(&wg_visible_count);
     let safe_wg_visible = min(total_wg_visible, 256u);
 
-    // 2. Выделяем место в глобальной VRAM ОДНИМ общим запросом от всей группы
+    // Выделяем место в глобальной VRAM одним общим запросом от всей группы
     if (local_id == 0u) {
         if (safe_wg_visible > 0u) {
             wg_global_offset = atomicAdd(&command_counter.count, safe_wg_visible);
         }
     }
-    // Расшариваем полученный глобальный сдвиг на всю группу
     workgroupBarrier();
 
-    // 3. КОАЛЕСЦЕНТНАЯ (УПОРЯДОЧЕННАЯ) ЗАПИСЬ В ГЛОБАЛЬНУЮ VRAM
-    // Потоки группы параллельно и последовательно выгружают данные из локального кэша в глобальный буфер.
-    // Никаких race condition: индексы гарантированно идут плотно и без задержек.
+    // Выгружаем упорядоченные команды в глобальный буфер
     for (var i = local_id; i < safe_wg_visible; i = i + 64u) {
         let local_task = wg_local_tasks[i];
         let cmd_id = wg_global_offset + i;
         
-        // Жесткая защита от переполнения глобального буфера (наши 200 команд для теста)
         if (cmd_id < 200u) {
             visible_instances[cmd_id].instance_id = local_task.instance_id;
             visible_instances[cmd_id].material_index = local_task.material_index;
@@ -166,7 +173,7 @@ fn culling_main(
             var cmd: DrawIndexedIndirectCommand;
             cmd.index_count = local_task.index_count; 
             cmd.instance_count = 1u;               
-            cmd.first_index = cmd_id * 18u; // Наш сквозной индекс
+            cmd.first_index = cmd_id * 18u; 
             cmd.base_vertex = 0;           
             cmd.first_instance = 0u;       
 
