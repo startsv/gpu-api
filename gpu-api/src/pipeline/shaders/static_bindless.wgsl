@@ -30,6 +30,9 @@ struct NodeData {
     info: vec4<u32>,
     transform: mat4x4<f32>,
 };
+@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
+//@group(2) @binding(1) var<storage, read> global_joint_matrices: array<mat4x4<f32>>;
+@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
 
 struct InstanceData {
     model_matrix: mat4x4<f32>,
@@ -50,24 +53,13 @@ struct InstanceData {
     aabb_max: vec3<f32>,
     pad_aabb2: u32,
 };
+@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 
-struct VisibleMeshletData {
-    meshlet_id: u32,
+struct VisibleInstanceData {
+    instance_id: u32,
     material_index: u32,
 };
-
-struct Meshlet {
-    vertex_offset: u32,
-    vertex_count: u32,
-    index_offset: u32,
-    triangle_count: u32,
-    instance_id: u32, 
-};
-
-@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
-@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
-@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
-@group(2) @binding(3) var<storage, read> global_meshlets: array<Meshlet>; // Переехал на binding 3
+@group(2) @binding(3) var<storage, read> visible_instances: array<VisibleInstanceData>;
 
 struct VertexInput {    
     @location(0) position: vec3<f32>,    
@@ -91,7 +83,7 @@ struct FragmentInput {
 
 fn read_baked_matrix(matrix_index: u32) -> mat4x4<f32> {
     let texture_width: u32 = 2048u;
-    let matrices_per_row: u32 = 512u;
+    let matrices_per_row: u32 = 512u;   // 512 (2048 / 4)
 
     let row = matrix_index / matrices_per_row;
     let col_matrix_offset = (matrix_index % matrices_per_row) * 4u;
@@ -110,14 +102,13 @@ fn read_baked_matrix(matrix_index: u32) -> mat4x4<f32> {
 @vertex
 fn vs_main(
     vertex_input: VertexInput, 
-    @builtin(instance_index) global_meshlet_id: u32 // Напрямую равен ID мешлета!
+    @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
-    let meshlet = global_meshlets[global_meshlet_id];
-    let instance = global_instances[meshlet.instance_id];
+    let render_data = visible_instances[draw_instance_idx];
+    let instance = global_instances[render_data.instance_id];
     var model_matrix = instance.model_matrix;
     let node = global_nodes[instance.node_index];
     
-    // Вычисление скелетной анимации (остается вашей оригинальной логикой)
     if (instance.is_animated == 1u) {
         if (node.info[0] == 1u) {
             model_matrix = model_matrix * node.transform;
@@ -138,6 +129,14 @@ fn vs_main(
                 vertex_input.weights[2] * m2 + 
                 vertex_input.weights[3] * m3;
 
+            /*
+            var skin_matrix: mat4x4<f32> = 
+                vertex_input.weights[0] * global_joint_matrices[j0] +
+                vertex_input.weights[1] * global_joint_matrices[j1] +
+                vertex_input.weights[2] * global_joint_matrices[j2] +
+                vertex_input.weights[3] * global_joint_matrices[j3];
+            */
+
             model_matrix = model_matrix * skin_matrix * node.transform;            
         }        
     } else {
@@ -150,7 +149,7 @@ fn vs_main(
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
     out.uv = vertex_input.uv;
-    out.material_index = instance.material_index; // Читаем материал напрямую из инстанса
+    out.material_index = render_data.material_index; 
         
     let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
     out.normal = normalize(normal_matrix * vertex_input.normal);

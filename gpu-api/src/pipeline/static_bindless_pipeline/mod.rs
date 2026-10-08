@@ -13,34 +13,6 @@ pub const MAX_INSTANCES: u64 = 100_000;
 pub const MAX_MATERIALS: u64 = 1_000;
 pub const MAX_TEXTURES: u32 = 256;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct MeshletData {
-    pub vertex_offset: u32,
-    pub vertex_count: u32,
-    pub index_offset: u32,
-    pub triangle_count: u32,
-    
-    pub instance_id: u32,
-    pub bounding_center_x: f32,
-    pub bounding_center_y: f32,
-    pub bounding_center_z: f32,
-    
-    pub bounding_radius: f32,
-    // Выравнивание структуры до кратности 16 байтам (4 байта * 12 полей = 48 байт)
-    pub _pad0: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct VisibleMeshletData {
-    pub meshlet_id: u32,
-    pub material_index: u32,
-}
-
-
 pub struct StaticBindlessResources {    
     pub mega_vertex_buffer: wgpu::Buffer,
     pub mega_index_buffer: wgpu::Buffer,
@@ -52,34 +24,13 @@ pub struct StaticBindlessResources {
     pub materials_buffer: wgpu::Buffer,
     
     pub culling_tasks_buffer: wgpu::Buffer,    
+    pub visible_instances_buffer: wgpu::Buffer,
     
-    // === ИЗМЕНЕНИЯ И НОВЫЕ БУФЕРЫ ДЛЯ МЕШЛЕТОВ ===
-    
-    /// Глобальный массив ВСЕХ мешлетов сцены (описания их геометрии и bounding-сфер).
-    /// Шейдер куллинга читает его, чтобы знать параметры каждого мешлета.
-    pub global_meshlets_buffer: wgpu::Buffer,
-
-    /// Заменяет старый `visible_instances_buffer`. 
-    /// Сюда Compute-шейдер записывает пары `(meshlet_id, material_index)` для прошедших куллинг мешлетов.
-    pub visible_meshlets_buffer: wgpu::Buffer,
-    
-    /// НОВЫЙ БУФЕР: Атомарный счетчик на GPU (размер 4 байта / u32).
-    /// Хранит текущее количество видимых мешлетов. Обнуляется перед куллингом.
-    /// Используется шейдером для `atomicAdd`, а также в `multi_draw_indexed_indirect_count`.
-    pub global_draw_counter_buffer: wgpu::Buffer,
-    
-    // ПОДСПУДНОЕ УДАЛЕНИЕ:
-    // pub indirect_commands_template_buffer: wgpu::Buffer, // БОЛЬШЕ НЕ НУЖЕН: команды генерируются на GPU с нуля
-    
-    /// Буфер для команд Multi-Draw Indirect. 
-    /// Теперь его размер должен быть равен общему числу мешлетов в сцене (`global_meshlets.len() * 20` байт).
-    pub indirect_commands_buffer: wgpu::Buffer,
     pub indirect_commands_template_buffer: wgpu::Buffer,
+    pub indirect_commands_buffer: wgpu::Buffer,
     
-    // =============================================
-
     pub culling_compute_pipeline: wgpu::ComputePipeline,
-    //pub clear_commands_pipeline: ClearCommandsPipeline, // Больше не нужен, заменен на encoder.clear_buffer
+    //pub clear_commands_pipeline: ClearCommandsPipeline,
     pub render_pipeline: wgpu::RenderPipeline,
     
     pub materials_bind_group: wgpu::BindGroup,
@@ -94,7 +45,7 @@ impl StaticBindlessResources {
         queue: &wgpu::Queue,        
         camera_uniform: &CameraUniform,
         depth_stencil: Option<wgpu::DepthStencilState>,
-        total_instances: usize,
+        primitives_count: usize,        
         init_data: &mut InitData,
     ) -> Self {                        
         let mega_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -123,7 +74,16 @@ impl StaticBindlessResources {
             size: MAX_INSTANCES * size_of::<NodeData>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });        
+        });
+
+        /*
+        let joints_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Joints Buffer"),
+            size: MAX_INSTANCES * 64 * 4, 
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        */
 
         let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Materials Buffer"),
@@ -139,141 +99,81 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        // Условное максимальное количество мешлетов, которое мы можем обрабатывать на GPU за кадр
-        let max_total_meshlets = total_instances * 2;
-
-        let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Indirect Commands Buffer"),
-            size: (max_total_meshlets * size_of::<DrawIndexedIndirectCommand>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+        let visible_instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Visible Instances Buffer"),            
+            size: MAX_INSTANCES * (size_of::<VisibleInstanceData>() as u64),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
+        });        
 
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Indirect Commands Buffer"),
-            size: (max_total_meshlets * size_of::<DrawIndexedIndirectCommand>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        
-
-        // Задайте максимальный лимит мешлетов, который может содержать сцена/уровень
-        let max_meshlets = 500_000_u64; 
-
-        // 1. GLOBAL MESHLETS BUFFER
-        // Хранит статичные геометрические параметры и сферы всех мешлетов всех моделей.
-        let global_meshlets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Global Meshlets Buffer"),
-            size: max_meshlets * std::mem::size_of::<MeshletData>() as u64,
-            // STORAGE: Читается в Compute и Vertex шейдерах
-            // COPY_DST: Позволяет загружать данные с CPU через queue.write_buffer
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Indirect Commands Buffer"),
+            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
-        // 2. VISIBLE MESHLETS BUFFER
-        // Сюда Compute-шейдер записывает индексы прошедших куллинг мешлетов.
-        let visible_meshlets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Visible Meshlets Buffer"),
-            size: max_meshlets * std::mem::size_of::<VisibleMeshletData>() as u64,
-            // STORAGE: Шейдер куллинга пишет в него (Read/Write), а Vertex-шейдер читает (Read)
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-
-        // 3. GLOBAL DRAW COUNTER BUFFER
-        // Атомарный счетчик на GPU. Хранит ровно одно число u32 (4 байта).
-        let global_draw_counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Global Draw Counter Buffer"),
-            size: 4, // 1 * std::mem::size_of::<u32>()
-            // STORAGE: Шейдер увеличивает значение через atomicAdd
-            // COPY_DST: Позволяет обнулять буфер на CPU перед кадром через encoder.clear_buffer
-            // INDIRECT: Позволяет использовать буфер как аргумент подсчета в multi_draw_indexed_indirect_count
-            usage: wgpu::BufferUsages::STORAGE 
-                | wgpu::BufferUsages::COPY_DST 
-                | wgpu::BufferUsages::INDIRECT,
-            mapped_at_creation: false,
-        });
-
         
         let culling_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Culling Compute Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/static_bindless_culling.wgsl").into()),
         });
 
-    let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-    label: Some("Culling Compute Bind Group Layout"),
-    entries: &[
-        // Binding 0: Culling Tasks (Read-only)
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 1: Global Instances (Read-only)
-        wgpu::BindGroupLayoutEntry {
-            binding: 1,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 2: Global Meshlets Geometry & Spheres Data (Read-only) - НОВЫЙ СЛОТ
-        wgpu::BindGroupLayoutEntry {
-            binding: 2,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 3: Visible Meshlets Output (Read/Write) - ЗАМЕНИЛ visible_instances
-        wgpu::BindGroupLayoutEntry {
-            binding: 3,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 4: Indirect Commands Buffer Output (Read/Write)
-        wgpu::BindGroupLayoutEntry {
-            binding: 4,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 5: Global Atomic Draw Counter (Read/Write) - НОВЫЙ СЛОТ
-        wgpu::BindGroupLayoutEntry {
-            binding: 5,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-    ],
-});
-
+        let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Culling Compute Bind Group Layout"),
+            entries: &[
+                // Binding 0: Culling Tasks
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 1: Instances
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 2: Visible Instance Indices                
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 3: Indirect Commands Buffer
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
 
     let camera_buffer = device.create_buffer_init(
         &wgpu::util::BufferInitDescriptor {
@@ -335,67 +235,62 @@ impl StaticBindlessResources {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/static_bindless.wgsl")))
         });
 
-        let render_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-    label: Some("Bindless Render Bind Group Layout"),
-    entries: &[
-        // Binding 0: Nodes (Read-only)
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 1: Joint Baked Texture
-        wgpu::BindGroupLayoutEntry {
-            binding: 1,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        },
-        // Binding 2: Global Instances - InstanceData (Read-only)
-        wgpu::BindGroupLayoutEntry {
-            binding: 2,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 3: Visible Meshlets Data - ЗАМЕНИЛ visible_instances (Read-only)
-        wgpu::BindGroupLayoutEntry {
-            binding: 3,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-        // Binding 4: Global Meshlets Geometry Reference Buffer (Read-only) - НОВЫЙ СЛОТ
-        wgpu::BindGroupLayoutEntry {
-            binding: 4,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-    ],
-});
-
+        let gpu_driven_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("GPU Driven Render Bind Group Layout"),
+            entries: &[
+                // Binding 0: Nodes
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 1: Joint Matrices
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    /*
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    */
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Binding 2: Global Instances - InstanceData
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 3: Visible Instance Indices
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
                 
         let texture_count = std::num::NonZeroU32::new(MAX_TEXTURES);
 
@@ -484,7 +379,7 @@ impl StaticBindlessResources {
             bind_group_layouts: &[
                 Some(&materials_bind_group_layout), // @group(0)
                 Some(&camera_bind_group_layout),    // @group(1)
-                Some(&render_bind_group_layout), // @group(2)
+                Some(&gpu_driven_bind_group_layout), // @group(2)
             ],
             immediate_size: 0,
         });
@@ -676,35 +571,21 @@ impl StaticBindlessResources {
             label: Some("Culling Compute Bind Group"),
             layout: &culling_compute_bind_group_layout,
             entries: &[                
-                // Binding 0: Задачи куллинга мешлетов
-                wgpu::BindGroupEntry { 
-                    binding: 0, 
-                    resource: culling_tasks_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: culling_tasks_buffer.as_entire_binding(),
                 },                
-                // Binding 1: Все инстансы объектов сцены
-                wgpu::BindGroupEntry { 
-                    binding: 1, 
-                    resource: instances_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: instances_buffer.as_entire_binding(),
                 },                
-                // Binding 2: Геометрия и сферы всех мешлетов (Новый)
-                wgpu::BindGroupEntry { 
-                    binding: 2, 
-                    resource: global_meshlets_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: visible_instances_buffer.as_entire_binding(),
                 },                
-                // Binding 3: Выходной буфер видимых мешлетов (Заменил visible_instances)
-                wgpu::BindGroupEntry { 
-                    binding: 3, 
-                    resource: visible_meshlets_buffer.as_entire_binding() 
-                },
-                // Binding 4: Выходной буфер indirect-команд для Multi-Draw
-                wgpu::BindGroupEntry { 
-                    binding: 4, 
-                    resource: indirect_commands_buffer.as_entire_binding() 
-                },
-                // Binding 5: Глобальный счетчик видимых мешлетов (Новый)
-                wgpu::BindGroupEntry { 
-                    binding: 5, 
-                    resource: global_draw_counter_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: indirect_commands_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -713,57 +594,66 @@ impl StaticBindlessResources {
 
         let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("GPU Driven Render Bind Group"),
-            layout: &render_bind_group_layout, // @group(2)
+            layout: &gpu_driven_bind_group_layout, // @group(2)
             entries: &[                
-                // Binding 0: Данные нод (трансформации костей скелета)
-                wgpu::BindGroupEntry { 
-                    binding: 0, 
-                    resource: nodes_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: nodes_buffer.as_entire_binding(),
                 },                
-                // Binding 1: Текстура запеченной анимации суставов
-                wgpu::BindGroupEntry { 
-                    binding: 1, 
-                    resource: wgpu::BindingResource::TextureView(&matrix_texture_view) 
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    //resource: joints_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(&matrix_texture_view),
                 },                
-                // Binding 2: Данные о всех инстансах объектов
-                wgpu::BindGroupEntry { 
-                    binding: 2, 
-                    resource: instances_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: instances_buffer.as_entire_binding(),
                 },                
-                // Binding 3: Список видимых мешлетов (Заменил visible_instances)
-                wgpu::BindGroupEntry { 
-                    binding: 3, 
-                    resource: visible_meshlets_buffer.as_entire_binding() 
-                },
-                // Binding 4: Глобальный буфер геометрии и метаданных мешлетов (Новый)
-                wgpu::BindGroupEntry { 
-                    binding: 4, 
-                    resource: global_meshlets_buffer.as_entire_binding() 
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: visible_instances_buffer.as_entire_binding(),
                 },
             ],
-        });        
+        });
+
+        //let clear_commands_pipeline = ClearCommandsPipeline::new(device, &indirect_commands_buffer, commands_count as u32);
 
         Self {    
             mega_vertex_buffer,
             mega_index_buffer,
             camera_buffer,
             instances_buffer,
-            nodes_buffer,            
+            nodes_buffer,
+            //joints_buffer,
             materials_buffer,
             culling_tasks_buffer,
-            global_draw_counter_buffer,
-            global_meshlets_buffer,
-            visible_meshlets_buffer,
-            indirect_commands_buffer,
+            visible_instances_buffer,
             indirect_commands_template_buffer,
-            culling_compute_pipeline,            
+            indirect_commands_buffer,
+            culling_compute_pipeline,
+            //clear_commands_pipeline,
             render_pipeline,
             materials_bind_group,
             camera_bind_group,
             culling_compute_bind_group,
             render_bind_group,
         }        
-    }    
+    }
+
+    pub fn init(
+        &self,
+        queue: &wgpu::Queue,
+        vertices: &[Vertex],
+        indices: &[u32],
+        material_factors: &[MaterialFactors],
+        indirect_commands: &[DrawIndexedIndirectCommand]
+    ) {
+        queue.write_buffer(&self.mega_vertex_buffer, 0, bytemuck::cast_slice(vertices));
+        queue.write_buffer(&self.mega_index_buffer, 0, bytemuck::cast_slice(indices));
+        queue.write_buffer(&self.materials_buffer, 0, bytemuck::cast_slice(material_factors));
+        queue.write_buffer(&self.indirect_commands_template_buffer, 0, bytemuck::cast_slice(indirect_commands));
+        queue.write_buffer(&self.indirect_commands_buffer, 0, bytemuck::cast_slice(indirect_commands));
+    }
   
     pub fn load_matrices_into_texture(device: &wgpu::Device, queue: &wgpu::Queue, joint_matrices: &mut Vec<Mat4>) -> wgpu::TextureView {
         let total_matrices = joint_matrices.len() as u32;
@@ -822,64 +712,17 @@ impl StaticBindlessResources {
 
         matrix_texture.create_view(&wgpu::TextureViewDescriptor::default())        
     }
-}
-
-
-impl StaticBindlessResources {
-    pub fn init(
-        &self,
-        queue: &wgpu::Queue,
-        vertices: &[Vertex],
-        indices: &[u32],
-        material_factors: &[MaterialFactors],
-        // Передаем сгенерированный на CPU массив данных мешлетов вместо старых indirect команд
-        global_meshlets: &[MeshletData] 
-    ) {
-        // 1. Загружаем геометрию в мега-буферы (без изменений)
-        queue.write_buffer(&self.mega_vertex_buffer, 0, bytemuck::cast_slice(vertices));
-        queue.write_buffer(&self.mega_index_buffer, 0, bytemuck::cast_slice(indices));
-        
-        // 2. Загружаем параметры материалов (без изменений)
-        queue.write_buffer(&self.materials_buffer, 0, bytemuck::cast_slice(material_factors));
-
-        // 3. Загружаем метаданные и bounding-сферы мешлетов в глобальный буфер
-        if !global_meshlets.is_empty() {
-            queue.write_buffer(
-                &self.global_meshlets_buffer, 
-                0, 
-                bytemuck::cast_slice(global_meshlets)
-            );
-        }
-        
-        // При создании сцены формируем полный список команд:
-        let mut indirect_commands = Vec::with_capacity(global_meshlets.len());
-        for meshlet in global_meshlets {
-            indirect_commands.push(DrawIndexedIndirectCommand {
-                index_count: meshlet.triangle_count * 3,
-                instance_count: 0, // Изначально все выключены, шейдер включит нужные
-                first_index: meshlet.index_offset,
-                base_vertex: meshlet.vertex_offset as i32,
-                first_instance: 0, // Больше не используется для передачи ID
-            });
-        }
-
-        // Загружаем этот шаблон в оба буфера
-        queue.write_buffer(&self.indirect_commands_template_buffer, 0, bytemuck::cast_slice(&indirect_commands));
-        queue.write_buffer(&self.indirect_commands_buffer, 0, bytemuck::cast_slice(&indirect_commands));
-
-    }
 
     pub fn load_frame(
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         camera_uniform: &CameraUniform,
-        staging_belt: &mut wgpu::util::StagingBelt,
+        staging_belt: &mut StagingBelt,
         instances: &[InstanceData],
         nodes: &[NodeData],
+        //joints: &[Mat4],
         culling_tasks: &[CullingTask],
-        // Передаем мешлеты, если они изменились/динамические (опционально)
-        // global_meshlets: &[Meshlet], 
     ) {
         {                                                                                            
             let mut camera_slice = staging_belt.write_buffer(
@@ -893,13 +736,19 @@ impl StaticBindlessResources {
 
         queue.write_buffer(&self.instances_buffer, 0, bytemuck::cast_slice(instances));
         queue.write_buffer(&self.nodes_buffer, 0, bytemuck::cast_slice(nodes));
+        //queue.write_buffer(&self.joints_buffer, 0, bytemuck::cast_slice(joints));
 
-        if !culling_tasks.is_empty() {
+        if culling_tasks.is_empty() == false {
             queue.write_buffer(&self.culling_tasks_buffer, 0, bytemuck::cast_slice(culling_tasks));
         }
     }
 
-    pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn clear_gpu_driven_frame(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        //compute_pass: &mut ComputePass,        
+    ) {
+        //self.clear_commands_pipeline.compute(compute_pass);
         encoder.copy_buffer_to_buffer(
             &self.indirect_commands_template_buffer,
             0,
@@ -911,34 +760,26 @@ impl StaticBindlessResources {
 
     pub fn compute_gpu_driven_frame(
         &self,
-        compute_pass: &mut wgpu::ComputePass,        
-        total_scene_meshlets: u32,
+        compute_pass: &mut ComputePass,        
     ) {        
         compute_pass.set_pipeline(&self.culling_compute_pipeline);
         compute_pass.set_bind_group(0, &self.camera_bind_group, &[]);
         compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]);
-        
-        let workgroup_count = (total_scene_meshlets + 63) / 64;
+        let workgroup_count = (100 + 63) / 64;
         compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
 
     pub fn draw_gpu_driven_frame(
         &self,
-        render_pass: &mut wgpu::RenderPass,
-        total_scene_meshlets: u32
+        render_pass: &mut RenderPass,
+        commands_len: u32
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.render_bind_group, &[]); // Тут лежат global_instances и global_meshlets       
-        
+        render_pass.set_bind_group(2, &self.render_bind_group, &[]);        
         render_pass.set_vertex_buffer(0, self.mega_vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.mega_index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
-        
-        render_pass.multi_draw_indexed_indirect(
-            &self.indirect_commands_buffer, 
-            0, 
-            total_scene_meshlets
-        );
+        render_pass.multi_draw_indexed_indirect(&self.indirect_commands_buffer, 0, commands_len);
     }
 }
