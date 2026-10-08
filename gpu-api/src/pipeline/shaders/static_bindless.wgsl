@@ -30,8 +30,6 @@ struct NodeData {
     info: vec4<u32>,
     transform: mat4x4<f32>,
 };
-@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
-@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
 
 struct InstanceData {
     model_matrix: mat4x4<f32>,
@@ -52,14 +50,11 @@ struct InstanceData {
     aabb_max: vec3<f32>,
     pad_aabb2: u32,
 };
-@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 
-// --- Новые буферы для Мешлетов ---
 struct VisibleMeshletData {
     meshlet_id: u32,
     material_index: u32,
 };
-@group(2) @binding(3) var<storage, read> visible_meshlets: array<VisibleMeshletData>;
 
 struct Meshlet {
     vertex_offset: u32,
@@ -68,10 +63,12 @@ struct Meshlet {
     triangle_count: u32,
     instance_id: u32, 
 };
-@group(2) @binding(4) var<storage, read> global_meshlets: array<Meshlet>;
 
-// Входные данные вершины остаются прежними (если вы используете стандартный Vertex Buffer).
-// Благодаря base_vertex в indirect-команде, vertex_input.position придет уже правильной для мешлета.
+@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
+@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
+@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
+@group(2) @binding(3) var<storage, read> global_meshlets: array<Meshlet>; // Переехал на binding 3
+
 struct VertexInput {    
     @location(0) position: vec3<f32>,    
     @location(1) uv: vec2<f32>,
@@ -113,18 +110,14 @@ fn read_baked_matrix(matrix_index: u32) -> mat4x4<f32> {
 @vertex
 fn vs_main(
     vertex_input: VertexInput, 
-    @builtin(instance_index) draw_meshlet_idx: u32 // Теперь указывает на индекс в visible_meshlets
+    @builtin(instance_index) global_meshlet_id: u32 // Напрямую равен ID мешлета!
 ) -> FragmentInput {    
-    // 1. Получаем данные о текущем мешлете
-    let render_data = visible_meshlets[draw_meshlet_idx];
-    let meshlet = global_meshlets[render_data.meshlet_id];
-    
-    // 2. Достаем инстанс, привязанный к мешлету (вместо render_data.instance_id)
+    let meshlet = global_meshlets[global_meshlet_id];
     let instance = global_instances[meshlet.instance_id];
     var model_matrix = instance.model_matrix;
     let node = global_nodes[instance.node_index];
     
-    // 3. Анимация (остается без изменений, так как кости привязаны к вершинам геометрии инстанса)
+    // Вычисление скелетной анимации (остается вашей оригинальной логикой)
     if (instance.is_animated == 1u) {
         if (node.info[0] == 1u) {
             model_matrix = model_matrix * node.transform;
@@ -157,7 +150,7 @@ fn vs_main(
     out.clip_position = camera.view_proj * model_position; 
     out.world_position = model_position.xyz;
     out.uv = vertex_input.uv;
-    out.material_index = render_data.material_index; 
+    out.material_index = instance.material_index; // Читаем материал напрямую из инстанса
         
     let normal_matrix = mat3x3<f32>(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz);
     out.normal = normalize(normal_matrix * vertex_input.normal);

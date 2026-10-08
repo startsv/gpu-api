@@ -74,6 +74,7 @@ pub struct StaticBindlessResources {
     /// Буфер для команд Multi-Draw Indirect. 
     /// Теперь его размер должен быть равен общему числу мешлетов в сцене (`global_meshlets.len() * 20` байт).
     pub indirect_commands_buffer: wgpu::Buffer,
+    pub indirect_commands_template_buffer: wgpu::Buffer,
     
     // =============================================
 
@@ -148,6 +149,15 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
+        let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Indirect Commands Buffer"),
+            size: (max_total_meshlets * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        
+
         // Задайте максимальный лимит мешлетов, который может содержать сцена/уровень
         let max_meshlets = 500_000_u64; 
 
@@ -192,7 +202,7 @@ impl StaticBindlessResources {
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/static_bindless_culling.wgsl").into()),
         });
 
-        let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    let culling_compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
     label: Some("Culling Compute Bind Group Layout"),
     entries: &[
         // Binding 0: Culling Tasks (Read-only)
@@ -222,7 +232,7 @@ impl StaticBindlessResources {
             binding: 2,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
                 has_dynamic_offset: false,
                 min_binding_size: None,
             },
@@ -731,26 +741,22 @@ impl StaticBindlessResources {
                     resource: global_meshlets_buffer.as_entire_binding() 
                 },
             ],
-        });
-
-
-        //let clear_commands_pipeline = ClearCommandsPipeline::new(device, &indirect_commands_buffer, commands_count as u32);
+        });        
 
         Self {    
             mega_vertex_buffer,
             mega_index_buffer,
             camera_buffer,
             instances_buffer,
-            nodes_buffer,
-            //joints_buffer,
+            nodes_buffer,            
             materials_buffer,
             culling_tasks_buffer,
             global_draw_counter_buffer,
             global_meshlets_buffer,
             visible_meshlets_buffer,
             indirect_commands_buffer,
-            culling_compute_pipeline,
-            //clear_commands_pipeline,
+            indirect_commands_template_buffer,
+            culling_compute_pipeline,            
             render_pipeline,
             materials_bind_group,
             camera_bind_group,
@@ -845,12 +851,23 @@ impl StaticBindlessResources {
             );
         }
         
-        // ЗАМЕЧАНИЕ: 
-        // self.indirect_commands_template_buffer — УДАЛЕН.
-        // self.indirect_commands_buffer — больше не заполняется с CPU, так как 
-        // GPU генерирует команды динамически во время фазы куллинга.
-    }
+        // При создании сцены формируем полный список команд:
+        let mut indirect_commands = Vec::with_capacity(global_meshlets.len());
+        for meshlet in global_meshlets {
+            indirect_commands.push(DrawIndexedIndirectCommand {
+                index_count: meshlet.triangle_count * 3,
+                instance_count: 0, // Изначально все выключены, шейдер включит нужные
+                first_index: meshlet.index_offset,
+                base_vertex: meshlet.vertex_offset as i32,
+                first_instance: 0, // Больше не используется для передачи ID
+            });
+        }
 
+        // Загружаем этот шаблон в оба буфера
+        queue.write_buffer(&self.indirect_commands_template_buffer, 0, bytemuck::cast_slice(&indirect_commands));
+        queue.write_buffer(&self.indirect_commands_buffer, 0, bytemuck::cast_slice(&indirect_commands));
+
+    }
 
     pub fn load_frame(
         &self,
@@ -882,73 +899,46 @@ impl StaticBindlessResources {
         }
     }
 
-    pub fn clear_gpu_driven_frame(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,       
-    ) {
-        // Вместо копирования шаблона команд, мы просто обнуляем глобальный счетчик видимых мешлетов.
-        // Шейдер куллинга сам запишет команды в indirect_commands_buffer, начиная с 0-го индекса.
-        encoder.clear_buffer(&self.global_draw_counter_buffer, 0, None);
-        
-        // Опционально: если вы НЕ используете multi_draw_indexed_indirect_count, 
-        // имеет смысл очистить и сам буфер команд, чтобы не отрисовать старые мешлеты с прошлого кадра,
-        // хотя выставление правильного лимита в draw_gpu_driven_frame обычно это решает.
-        // encoder.clear_buffer(&self.indirect_commands_buffer, 0, None);
+    pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_buffer(
+            &self.indirect_commands_template_buffer,
+            0,
+            &self.indirect_commands_buffer,
+            0,
+            self.indirect_commands_buffer.size(), 
+        );
     }
 
     pub fn compute_gpu_driven_frame(
         &self,
         compute_pass: &mut wgpu::ComputePass,        
-        culling_tasks_count: u32, // Передаем реальное количество задач в этом кадре
+        total_scene_meshlets: u32,
     ) {        
         compute_pass.set_pipeline(&self.culling_compute_pipeline);
         compute_pass.set_bind_group(0, &self.camera_bind_group, &[]);
         compute_pass.set_bind_group(1, &self.culling_compute_bind_group, &[]);
         
-        // Количество рабочих групп теперь строго равно количеству задач куллинга (1 task = 1 workgroup)
-        // Внутри группы 64 потока будут параллельно перебирать мешлеты этой задачи
-        if culling_tasks_count > 0 {
-            compute_pass.dispatch_workgroups(culling_tasks_count, 1, 1);
-        }
+        let workgroup_count = (total_scene_meshlets + 63) / 64;
+        compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
 
     pub fn draw_gpu_driven_frame(
         &self,
         render_pass: &mut wgpu::RenderPass,
-        max_commands_len: u32 // Максимальная вместимость вашего indirect_commands_buffer (общее число мешлетов в сцене)
+        total_scene_meshlets: u32
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.render_bind_group, &[]);        
+        render_pass.set_bind_group(2, &self.render_bind_group, &[]); // Тут лежат global_instances и global_meshlets       
         
         render_pass.set_vertex_buffer(0, self.mega_vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.mega_index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
         
-        // ВАРИАНТ А: У вас включена фича MULTI_DRAW_INDIRECT_COUNT (Рекомендуется)
-        // Видеокарта сама возьмет точное число сгенерированных команд из global_draw_counter_buffer
-        #[cfg(feature = "use_mdi_count")]
-        {
-            render_pass.multi_draw_indexed_indirect_count(
-                &self.indirect_commands_buffer,
-                0,
-                &self.global_draw_counter_buffer,
-                0,
-                max_commands_len, // Ограничитель сверху во избежание переполнения GPU
-            );
-        }
-
-        // ВАРИАНТ Б: Стандартный Multi-Draw Indirect (Без MDI Count расширения)
-        // Если расширение недоступно, передаем max_commands_len (размер буфера). 
-        // Чтобы видеокарта не рисовала «пустые» слоты, ваш Compute-шейдер при инициализации буфера 
-        // (или метод clear_gpu_driven_frame) должен гарантировать, что у невидимых мешлетов instance_count == 0.
-        #[cfg(not(feature = "use_mdi_count"))]
-        {
-            render_pass.multi_draw_indexed_indirect(
-                &self.indirect_commands_buffer, 
-                0, 
-                max_commands_len
-            );
-        }
+        render_pass.multi_draw_indexed_indirect(
+            &self.indirect_commands_buffer, 
+            0, 
+            total_scene_meshlets
+        );
     }
 }
