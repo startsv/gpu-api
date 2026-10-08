@@ -186,10 +186,15 @@ impl StaticBindlessResources {
 
         let command_counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("MDI Command Counter Buffer"),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            // Выделяем 256 байт вместо 4 для безопасного выравнивания на любом железе
+            size: 256, 
+            // Обязательно добавляем STORAGE (для Compute), INDIRECT (для Render) и COPY_DST (для clear)
+            usage: wgpu::BufferUsages::STORAGE 
+                | wgpu::BufferUsages::INDIRECT 
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+
         
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Static Indirect Commands Buffer"),
@@ -886,9 +891,12 @@ impl StaticBindlessResources {
 
     /// Очищает счетчик команд перед стадией куллинга.
     /// Заменяет старый тяжелый clear_gpu_driven_frame.
-    pub fn clear_gpu_driven_frame(&self, encoder: &mut wgpu::CommandEncoder) {                
+    pub fn clear_gpu_driven_frame(&self, queue: &wgpu::Queue) {
+        let zero: [u32; 1] = [0];
+        queue.write_buffer(&self.command_counter_buffer, 0, bytemuck::cast_slice(&zero));
+
         // 1. Сбрасываем атомарный счетчик в 0
-        encoder.clear_buffer(&self.command_counter_buffer, 0, None);      
+        //encoder.clear_buffer(&self.command_counter_buffer, 0, None);      
 
         // 2. Зануляем весь буфер indirect-команд, чтобы убрать хвосты прошлого кадра!
         //encoder.clear_buffer(&self.indirect_commands_buffer, 0, None);
@@ -923,6 +931,7 @@ impl StaticBindlessResources {
         // Вариант 1: Использование нативного расширения Multi Draw Indirect Count (Рекомендуется для десктопа)
         // Для этого ваше WGPU Device должно быть создано с Feature::MULTI_DRAW_INDEXED_INDIRECT_COUNT
         
+        /*
         render_pass.multi_draw_indexed_indirect_count(
             &self.indirect_commands_buffer,
             0,
@@ -930,6 +939,7 @@ impl StaticBindlessResources {
             0,
             self.total_meshlets_commands_count, // Максимально возможный лимит
         );
+        */
         
 
         // Вариант 2: Стандартный Multi Draw Indirect (Для WebGPU/Браузеров без расширений)
@@ -937,12 +947,13 @@ impl StaticBindlessResources {
         // но прочитает его до максимального теоретического лимита сцены. Внутри неинициализированных 
         // команд instance_count будет равен 0 (благодаря аллокации буфера с Wgpu::BufferUsages::COPY_DST/STORAGE и clear_buffer),
         // поэтому видеокарта мгновенно пропустит пустые хвосты.
-        /*
+
+        info!("Drawing {}", self.total_meshlets_commands_count);
+        
         render_pass.multi_draw_indexed_indirect(
             &self.indirect_commands_buffer, 
             0, 
             self.total_meshlets_commands_count
-        );
-        */        
+        );                
     }
 }

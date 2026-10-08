@@ -116,29 +116,32 @@ struct FragmentInput {
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) vertex_id: u32,          // Локальный индекс внутри мешлета (0..17)
-    @builtin(instance_index) draw_instance_idx: u32 // Автоматически равен cmd_id из команды!
+    // Благодаря смещению first_index, этот ID гарантированно равен: (cmd_id * 18) + локальный_индекс
+    @builtin(vertex_index) hardware_vertex_id: u32 
 ) -> FragmentInput {    
     
-    // Прямой bindless доступ без масок и сдвигов
-    let render_data = visible_instances[draw_instance_idx];
+    let indices_per_meshlet = 18u; 
+    
+    // Математика теперь работает со 100% стабильностью, так как hardware_vertex_id растет непрерывно
+    let cmd_id = hardware_vertex_id / indices_per_meshlet;
+    let vertex_id = hardware_vertex_id % indices_per_meshlet;
+    
+    // Вся остальная выборка данных остается без изменений...
+    let render_data = visible_instances[cmd_id];
     
     let instance = global_instances[render_data.instance_id];
     let meshlet = global_meshlets[render_data.meshlet_index];
     let mesh_info = global_mesh_infos[instance.primitive_index];
     
-    // Вычисляем адрес локального индекса треугольника внутри мешлета
     let local_index_address = meshlet.index_offset + vertex_id;
     let local_vertex_id = meshlet_local_indices[local_index_address];
     
-    // Достаем реальный ID вершины в мега-буфере статики
     let redirect_address = meshlet.vertex_offset + local_vertex_id;
     let actual_vertex_id = meshlet_vertex_redirect[redirect_address];
     
     let global_vertex_idx = actual_vertex_id + mesh_info.vertex_buffer_offset;
     let vertex = static_vertices[global_vertex_idx];
     
-    // --- Математика трансформаций (model_matrix, view_proj и т.д.) ---
     let model_matrix = instance.model_matrix;
     let model_position = model_matrix * vec4<f32>(vertex.position, 1.0);
     

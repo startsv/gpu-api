@@ -131,10 +131,14 @@ pub fn generate_static_test_data(num_instances: u32) -> TestSceneData {
         base_vertex: 0,
     }];
 
-    // Создаем линейную развертку шаблона индексов [0, 1, 2... 17]
-    // ВАЖНО: Если у вас будут мешлеты большего размера (например, до 126 индексов),
-    // этот шаблон должен генерироваться до максимального размера meshlet.index_count в сцене.
-    let dummy_indices_template: Vec<u32> = (0..18).collect();
+
+    // Вместо (0..18) делаем большой сквозной буфер-шаблон на CPU
+// С запасом, например, на 10 000 мешлетов (180 000 индексов), памяти это почти не занимает
+    let max_theoretical_indices = 200_000;
+    let dummy_indices_template: Vec<u32> = (0..max_theoretical_indices).collect();
+
+    // Передаем этот большой вектор в queue.write_buffer(&self.index_buffer, ...)
+
 
     let mut instances = Vec::new();
 
