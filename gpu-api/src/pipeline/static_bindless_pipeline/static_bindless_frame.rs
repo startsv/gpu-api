@@ -53,25 +53,28 @@ impl StaticBindlessResources {
         nodes: &[NodeData],
         culling_tasks: &[CullingTask], 
     ) {
-        // Получаем диапазоны смещений для текущего активного кадра
         let current_ranges = &self.frame_ranges[self.frame_index % NUM_FRAMES_IN_FLIGHT];
 
         // 1. Загружаем данные камеры в кадровый срез монолитного frame_ring_buffer через StagingBelt
         {                                                                                                        
-            let camera_size = std::num::NonZeroU64::new(current_ranges.camera.size)
+            let raw_camera_size = std::mem::size_of::<CameraUniform>() as u64;
+            let camera_size_nonzero = std::num::NonZeroU64::new(raw_camera_size)
                 .expect("Invalid camera uniform size");
+                
             let mut camera_slice = staging_belt.write_buffer(
                 encoder,
                 &self.frame_ring_buffer,
-                current_ranges.camera.offset, // Пишем строго по оффсету текущего кадра
-                camera_size,
+                current_ranges.camera.offset, // Выровненный оффсет кадра
+                camera_size_nonzero,
             );            
             camera_slice.copy_from_slice(bytemuck::bytes_of(camera_uniform));
         }
 
-        // 2. Обновляем динамические списки объектов сцены в scene_data_buffer
+        // 2. Обновляем динамические списки объектов сцены строго в их срезы внутри scene_data_buffer
         queue.write_buffer(&self.scene_data_buffer, self.instances_range.offset, bytemuck::cast_slice(instances));
-        queue.write_buffer(&self.scene_data_buffer, self.nodes_range.offset, bytemuck::cast_slice(nodes));
+
+        // ФИКС: Пишем данные нод в scene_data_buffer по правильному оффсету
+        queue.write_buffer(&self.scene_data_buffer, self.nodes_range.offset, bytemuck::cast_slice(nodes)); 
 
         if !culling_tasks.is_empty() {
             queue.write_buffer(&self.scene_data_buffer, self.culling_tasks_range.offset, bytemuck::cast_slice(culling_tasks));
