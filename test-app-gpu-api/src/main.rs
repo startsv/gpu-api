@@ -222,11 +222,13 @@ async fn run() {
     let model_bindless_resources = pipeline::model_bindless_pipeline::ModelBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state.clone(),
         registered_primitives.len(),
         &mut init_data
-    );    
+    );
     
-    let static_num_instances = 10;
+    let static_test_data = generate_n_cubes_scene(10);
+    let static_commands_total = static_test_data.3.len();    
+    let static_draw_commands_len = static_commands_total as u32;
 
-    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, 100, &mut init_data);
+    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, static_commands_total, &mut init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -256,11 +258,9 @@ async fn run() {
 
     test_world.prepare_gpu_indirect_frame(&frame_data, &mut model_culling_tasks, &mut global_instances);
    
-    model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);    
-    
-    let q = generate_n_cubes_scene(10);
+    model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);            
 
-    static_bindless_resources.init(&queue, &q.0, &q.1, &init_data.factors, &q.3, &q.4);
+    static_bindless_resources.init(&queue, &static_test_data.0, &static_test_data.1, &init_data.factors, &static_test_data.3, &static_test_data.4);
 
     object_group.objects.push(object);
 
@@ -855,7 +855,6 @@ async fn run() {
 
                                 static_bindless_resources.compute_gpu_driven_frame(&mut compute_pass);
                             }
-                            /*
 
                             model_bindless_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &global_instances, &init_data.nodes,
                                 //&init_data.joints,
@@ -870,7 +869,7 @@ async fn run() {
 
                                 model_bindless_resources.compute_gpu_driven_frame(&mut compute_pass);
                             }
-                            */
+                            
                             {
                                 let mut render_pass = encoder.begin_render_pass(
                                     &wgpu::RenderPassDescriptor {
@@ -907,9 +906,9 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 200);
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, static_draw_commands_len);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
-                                //model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
+                                model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
                                 line_pipeline.draw(&mut render_pass, line_indices.len() as u32);
                                 aa_line_pipeline.draw(&mut render_pass, aa_line_instances.len() as u32);

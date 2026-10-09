@@ -75,7 +75,7 @@ impl StaticBindlessResources {
         queue: &wgpu::Queue,        
         camera_uniform: &CameraUniform,
         depth_stencil: Option<wgpu::DepthStencilState>,
-        primitives_count: usize,        
+        indirect_commands_total: usize,
         init_data: &mut InitData,
     ) -> Self {                        
         let mega_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -134,10 +134,9 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        // Рассчитываем размер на основе реального суммарного количества мешлетов всех инстансов
-        let max_total_meshlets = 200; 
+        // Рассчитываем размер на основе реального суммарного количества мешлетов всех инстансов        
         let command_stride = std::mem::size_of::<DrawIndexedIndirectCommand>() as u64; // 20 байт
-        let buffer_size = max_total_meshlets * command_stride;
+        let buffer_size = indirect_commands_total as u64 * command_stride;
 
         // 1. БУФЕР-ШАБЛОН КОМАНД (Хранит дефолтные команды с instance_count = 0)
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
