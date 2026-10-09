@@ -39,7 +39,6 @@ pub struct MeshletData {
 // Итоговый размер структуры: ровно 48 байт (кратно 16). шаг (stride) в массиве будет плотным.
 
 
-
 pub struct StaticBindlessResources {    
     pub mega_vertex_buffer: wgpu::Buffer,
     pub mega_index_buffer: wgpu::Buffer,
@@ -107,15 +106,6 @@ impl StaticBindlessResources {
             mapped_at_creation: false,
         });
 
-        /*
-        let joints_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Joints Buffer"),
-            size: MAX_INSTANCES * 64 * 4, 
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        */
-
         let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Materials Buffer"),
             size: MAX_MATERIALS * size_of::<MaterialFactors>() as u64, 
@@ -139,25 +129,36 @@ impl StaticBindlessResources {
 
         let global_meshlets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Global Meshlets Buffer"),
-            size: 10 * 48,
+            size: 100 * 48,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
+        // Рассчитываем размер на основе реального суммарного количества мешлетов всех инстансов
+        let max_total_meshlets = 200; 
+        let command_stride = std::mem::size_of::<DrawIndexedIndirectCommand>() as u64; // 20 байт
+        let buffer_size = max_total_meshlets * command_stride;
 
+        // 1. БУФЕР-ШАБЛОН КОМАНД (Хранит дефолтные команды с instance_count = 0)
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Indirect Commands Buffer"),
-            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            label: Some("Indirect Commands Template Buffer"),
+            size: buffer_size,
+            // COPY_DST — чтобы инициализировать с CPU через queue.write_buffer
+            // COPY_SRC — чтобы каждую операцию clear копировать его содержимое на GPU
             usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
+        // 2. РАБОЧИЙ БУФЕР КОМАНД (В него пишет Compute-шейдер и из него читает Render)
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Indirect Commands Buffer"),
-            size: (primitives_count * 3 * size_of::<DrawIndexedIndirectCommand>()) as u64,
+            label: Some("MDI Operating Indirect Commands Buffer"),
+            size: buffer_size, // Размеры должны СТРОГО совпадать до байта
+            // STORAGE — чтобы Compute-шейдер мог писать в него (read_write)
+            // INDIRECT — чтобы Render Pass мог использовать его в multi_draw_indexed_indirect
+            // COPY_DST — чтобы принимать данные при сбросе кадра из буфера-шаблона
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
+        });      
         
         let culling_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Culling Compute Shader"),

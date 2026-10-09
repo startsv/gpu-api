@@ -145,7 +145,7 @@ fn culling_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let max_scale = max(scale_x, max(scale_y, scale_z));
     
     let sphere_world_radius = meshlet.bounding_radius * max_scale;
-    
+        
     if (is_sphere_visible(sphere_world_center, sphere_world_radius)) {
         indirect_commands[global_meshlet_id].instance_count = 1u;
     } else {

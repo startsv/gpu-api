@@ -25,45 +25,15 @@ impl StaticBindlessResources {
         vertices: &[Vertex],
         indices: &[u32],
         material_factors: &[MaterialFactors],
-        indirect_commands: &[DrawIndexedIndirectCommand]
+        indirect_commands: &[DrawIndexedIndirectCommand],
+        meshlets: &[MeshletData]
     ) {
         queue.write_buffer(&self.mega_vertex_buffer, 0, bytemuck::cast_slice(vertices));
         queue.write_buffer(&self.mega_index_buffer, 0, bytemuck::cast_slice(indices));
         queue.write_buffer(&self.materials_buffer, 0, bytemuck::cast_slice(material_factors));
         queue.write_buffer(&self.indirect_commands_template_buffer, 0, bytemuck::cast_slice(indirect_commands));
         queue.write_buffer(&self.indirect_commands_buffer, 0, bytemuck::cast_slice(indirect_commands));
-
-        // Допустим, у вас есть общее количество инстансов в сцене:
-        let total_instances = 10;
-
-        // Создаем по одному фейковому мешлету на каждый инстанс
-        let mut temporary_meshlets = Vec::with_capacity(total_instances);
-        for instance_id in 0..total_instances {
-            temporary_meshlets.push(MeshletData {
-                vertex_offset: 0,
-                vertex_count: 0,
-                index_offset: 0,
-                triangle_count: 1, // Просто чтобы не было нуля
-                
-                instance_id: instance_id as u32, // Указываем шейдеру на этот инстанс
-                bounding_center_x: 0.0,
-                bounding_center_y: 0.0,
-                bounding_center_z: 0.0,
-                bounding_radius: 1.0,
-                
-                _pad0: 0, _pad1: 0, _pad2: 0,
-            });
-        }
-
-        // Перевыделяем/записываем этот массив в ваш новый буфер мешлетов
-        // Убедитесь, что размер global_meshlets_buffer при создании (размер в байтах) 
-        // теперь равен или больше, чем temporary_meshlets.len() * 48
-        queue.write_buffer(
-            &self.global_meshlets_buffer, 
-            0, 
-            bytemuck::cast_slice(&temporary_meshlets)
-        );
-
+        queue.write_buffer(&self.global_meshlets_buffer, 0, bytemuck::cast_slice(&meshlets));
     }
       
     pub fn load_frame(
@@ -99,9 +69,7 @@ impl StaticBindlessResources {
     pub fn clear_gpu_driven_frame(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        //compute_pass: &mut ComputePass,        
-    ) {
-        //self.clear_commands_pipeline.compute(compute_pass);
+    ) {        
         encoder.copy_buffer_to_buffer(
             &self.indirect_commands_template_buffer,
             0,

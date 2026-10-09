@@ -12,7 +12,7 @@ use tokio::runtime::Runtime;
 use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
-use crate::test_data::{generate_grid, generate_test_surface};
+use crate::test_data::{generate_grid, generate_n_cubes_scene, generate_test_surface};
 
 mod test_data;
 
@@ -257,13 +257,10 @@ async fn run() {
     test_world.prepare_gpu_indirect_frame(&frame_data, &mut model_culling_tasks, &mut global_instances);
    
     model_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);    
-
     
-    //let (vertices, indices, base_meshlets, mesh_assets) = generate_unique_mesh_assets(3);
-    
-    //let (static_instances, static_culling_tasks, static_scene_meshlets) = build_test_scene(&mesh_assets, &base_meshlets, static_num_instances as u32);
+    let q = generate_n_cubes_scene(10);
 
-    static_bindless_resources.init(&queue, &init_data.vertices, &init_data.indices, &init_data.factors, &indirect_commands);
+    static_bindless_resources.init(&queue, &q.0, &q.1, &init_data.factors, &q.3, &q.4);
 
     object_group.objects.push(object);
 

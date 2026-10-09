@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3};
-use gpu_api::pipeline::{aa_line_pipeline::AaLineInstance};
-use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, InstanceData, StaticVertex, SurfaceData, SurfaceMeshletDescription, SurfaceVertex, Vertex}; // Используем вашу математическую библиотеку (скорее всего glam)
+use gpu_api::pipeline::{aa_line_pipeline::AaLineInstance, static_bindless_pipeline::MeshletData};
+use gpu_api_relay::model_bindless_data::{CullingTask, DrawIndexedIndirectCommand, InstanceData, MaterialFactors, StaticVertex, SurfaceData, SurfaceMeshletDescription, SurfaceVertex, Vertex}; // Используем вашу математическую библиотеку (скорее всего glam)
 
 pub fn generate_grid(
     lines: &mut Vec<AaLineInstance>, 
@@ -156,4 +156,139 @@ pub fn generate_test_surface(
     });
 
     surface_data
+}
+
+/// Генерирует N кубов в пространстве. Каждый куб разбивается на 6 мешлетов (по одному на грань).
+pub fn generate_n_cubes_scene(
+    cube_count: u32,
+) -> (Vec<Vertex>, Vec<u32>, Vec<MaterialFactors>, Vec<DrawIndexedIndirectCommand>, Vec<MeshletData>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut meshlets = Vec::new();
+    let mut indirect_commands = Vec::new();
+    let mut material_factors = Vec::new();
+
+    // Размеры одного куба
+    let half_size = 0.5f32;
+
+    // Шаг сетки для расстановки кубов в пространстве
+    let grid_size = (cube_count as f32).sqrt().ceil() as i32;
+    let spacing = 3.0f32;
+
+    // Определим вершины и индексы для 6 граней куба в локальных координатах.
+    // Каждая грань — это 4 вершины и 2 треугольника (6 индексов).
+    let face_normals = [
+        Vec3::new(0.0, 0.0, 1.0),  // Front
+        Vec3::new(0.0, 0.0, -1.0), // Back
+        Vec3::new(-1.0, 0.0, 0.0), // Left
+        Vec3::new(1.0, 0.0, 0.0),  // Right
+        Vec3::new(0.0, 1.0, 0.0),  // Top
+        Vec3::new(0.0, -1.0, 0.0), // Bottom
+    ];
+
+    // Локальные направления для построения плоскостей граней
+    let face_tangents = [
+        Vec3::new(1.0, 0.0, 0.0),  // Front
+        Vec3::new(-1.0, 0.0, 0.0), // Back
+        Vec3::new(0.0, 0.0, 1.0),  // Left
+        Vec3::new(0.0, 0.0, -1.0), // Right
+        Vec3::new(1.0, 0.0, 0.0),  // Top
+        Vec3::new(1.0, 0.0, 0.0),  // Bottom
+    ];
+
+    for cube_id in 0..cube_count {
+        // Добавляем один тестовый материал на куб
+        material_factors.push(MaterialFactors {
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],            
+            emissive_factor: [0.0, 0.0, 0.0],
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+            padding: [0, 0, 0],
+        });
+
+        // Считаем позицию куба на XZ сетке в мире
+        let x_pos = (cube_id as i32 % grid_size) as f32 * spacing;
+        let z_pos = (cube_id as i32 / grid_size) as f32 * spacing;
+        let world_offset = Vec3::new(x_pos, 0.0, z_pos);
+
+        // Генерируем 6 граней куба. Каждая грань станет отдельным мешлетом.
+        for face_id in 0..6 {
+            let normal = face_normals[face_id];
+            let tangent = face_tangents[face_id];
+            let bitangent = normal.cross(tangent);
+
+            let base_vertex_idx = vertices.len() as u32;
+            let start_index_offset = indices.len() as u32;
+
+            // Центр конкретной грани куба
+            let face_center = normal * half_size + world_offset;
+
+            // Генерируем 4 вершины для текущей грани куба
+            let local_quad_verts = [
+                face_center - tangent * half_size - bitangent * half_size,
+                face_center + tangent * half_size - bitangent * half_size,
+                face_center + tangent * half_size + bitangent * half_size,
+                face_center - tangent * half_size + bitangent * half_size,
+            ];
+
+            let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+
+            for i in 0..4 {
+                vertices.push(Vertex {
+                    position: local_quad_verts[i].to_array(),
+                    uv: uvs[i],
+                    normal: normal.to_array(),
+                    tangent: tangent.to_array(),
+                    bitangent: bitangent.to_array(),
+                    joints: [0; 4],
+                    weights: [1.0, 0.0, 0.0, 0.0],
+                });
+            }
+
+            // Индексы для двух треугольников грани (Quad)
+            indices.push(base_vertex_idx + 0);
+            indices.push(base_vertex_idx + 1);
+            indices.push(base_vertex_idx + 2);
+
+            indices.push(base_vertex_idx + 0);
+            indices.push(base_vertex_idx + 2);
+            indices.push(base_vertex_idx + 3);
+
+            let triangle_count = 2; // 2 треугольника на мешлет-грань
+
+            // Вычисляем Bounding Sphere для этого мешлета (грани)
+            // Радиус сферы, охватывающей квадратную грань куба
+            let bounding_radius = (half_size * half_size + half_size * half_size).sqrt();
+
+            // В нашей статической схеме instance_id мешлета жестко указывает на ID куба,
+            // чтобы шейдер куллинга мог извлечь нужную model_matrix инстанса.
+            let meshlet = MeshletData {
+                vertex_offset: 0, // Работаем через единый глобальный буфер
+                vertex_count: 4,
+                index_offset: start_index_offset,
+                triangle_count,
+                
+                instance_id: cube_id, // Связь мешлета с объектом
+                bounding_center_x: face_center.x - world_offset.x, // В локальных координатах инстанса
+                bounding_center_y: face_center.y - world_offset.y,
+                bounding_center_z: face_center.z - world_offset.z,
+                bounding_radius,
+                
+                _pad0: 0, _pad1: 0, _pad2: 0,
+            };
+
+            meshlets.push(meshlet);
+
+            // Сразу же генерируем парную Draw-команду для этого мешлета
+            indirect_commands.push(DrawIndexedIndirectCommand {
+                index_count: triangle_count * 3,
+                instance_count: 0, // Изначально выключен, шейдер куллинга включит
+                first_index: start_index_offset,
+                base_vertex: 0,    // Индексы уже глобальные внутри mega_index_buffer
+                first_instance: 0,
+            });
+        }
+    }
+
+    (vertices, indices, material_factors, indirect_commands, meshlets)
 }
