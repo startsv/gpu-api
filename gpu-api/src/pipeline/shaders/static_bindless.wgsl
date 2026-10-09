@@ -64,11 +64,13 @@ struct Meshlet {
     triangle_count: u32,
     
     instance_id: u32,
+
     bounding_center_x: f32,
     bounding_center_y: f32,
     bounding_center_z: f32,
     
     bounding_radius: f32,
+    
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
