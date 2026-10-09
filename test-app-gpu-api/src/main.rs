@@ -85,15 +85,13 @@ async fn run() {
                 required_features:
                     wgpu::Features::TEXTURE_FORMAT_16BIT_NORM |
                     wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
-                    wgpu::Features::TEXTURE_BINDING_ARRAY |
-                    wgpu::Features::MULTI_DRAW_INDIRECT_COUNT,                    
+                    wgpu::Features::TEXTURE_BINDING_ARRAY,                  
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
                     wgpu::Limits {
                         max_binding_array_elements_per_shader_stage: gpu_api::pipeline::model_bindless_pipeline::MAX_TEXTURES * 8,
-                        max_binding_array_sampler_elements_per_shader_stage: gpu_api::pipeline::model_bindless_pipeline::MAX_TEXTURES * 4,
-                        max_storage_buffers_per_shader_stage: 16,
+                        max_binding_array_sampler_elements_per_shader_stage: gpu_api::pipeline::model_bindless_pipeline::MAX_TEXTURES * 4,                        
                         ..Default::default()
                     }
                 },
