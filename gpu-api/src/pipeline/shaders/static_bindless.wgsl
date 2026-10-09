@@ -8,6 +8,7 @@ enable wgpu_binding_array;
 @group(0) @binding(5) var normal_samplers: binding_array<sampler>;
 @group(0) @binding(6) var emissive_textures: binding_array<texture_2d<f32>>;
 @group(0) @binding(7) var emissive_samplers: binding_array<sampler>;
+@group(0) @binding(8) var<storage, read> global_materials: array<MaterialFactors>;
 
 struct MaterialFactors {
     base_color_factor: vec4<f32>,
@@ -16,7 +17,7 @@ struct MaterialFactors {
     roughness_factor: f32,
     padding: vec3<f32>,
 }
-@group(0) @binding(8) var<storage, read> global_materials: array<MaterialFactors>;
+
 
 struct CameraUniform {
     camera_position: vec3<f32>,
@@ -24,15 +25,12 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
     frustum_planes: array<vec4<f32>, 6>,
 };
-@group(1) @binding(0) var<uniform> camera: CameraUniform;
+
 
 struct NodeData {
     info: vec4<u32>,
     transform: mat4x4<f32>,
 };
-@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
-//@group(2) @binding(1) var<storage, read> global_joint_matrices: array<mat4x4<f32>>;
-@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
 
 struct InstanceData {
     model_matrix: mat4x4<f32>,
@@ -53,13 +51,36 @@ struct InstanceData {
     aabb_max: vec3<f32>,
     pad_aabb2: u32,
 };
-@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 
 struct VisibleInstanceData {
     instance_id: u32,
     material_index: u32,
 };
+
+struct Meshlet {
+    vertex_offset: u32,
+    vertex_count: u32,
+    index_offset: u32,
+    triangle_count: u32,
+    
+    instance_id: u32,
+    bounding_center_x: f32,
+    bounding_center_y: f32,
+    bounding_center_z: f32,
+    
+    bounding_radius: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+@group(1) @binding(0) var<uniform> camera: CameraUniform;
+
+@group(2) @binding(0) var<storage, read> global_nodes: array<NodeData>;
+@group(2) @binding(1) var global_joint_texture: texture_2d<f32>;
+@group(2) @binding(2) var<storage, read> global_instances: array<InstanceData>;
 @group(2) @binding(3) var<storage, read> visible_instances: array<VisibleInstanceData>;
+@group(2) @binding(4) var<storage, read> global_meshlets: array<Meshlet>;
 
 struct VertexInput {    
     @location(0) position: vec3<f32>,    

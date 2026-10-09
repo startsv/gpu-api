@@ -827,7 +827,7 @@ async fn run() {
                                     }
                                 }
                             }
-                            /*              
+                                        
                             surface_resources.load_frame(&queue, &mut encoder, &camera_uniform, &mut staging_belt, &surface_culling_tasks);
                             surface_resources.clear_gpu_driven_frame(&mut encoder);
                             
@@ -838,8 +838,7 @@ async fn run() {
                                 });
 
                                 surface_resources.compute_gpu_driven_frame(&mut compute_pass, surface_data.meshlets.len() as u32);
-                            }
-                            */
+                            }                            
                                                         
                             if init_data.nodes.is_empty() {
                                 init_data.nodes.push(NodeData {
@@ -912,7 +911,7 @@ async fn run() {
                                 );
 
                                 static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 200);
-                                //surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
+                                surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 //model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);
                                 line_pipeline.draw(&mut render_pass, line_indices.len() as u32);

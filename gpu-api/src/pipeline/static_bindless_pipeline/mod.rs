@@ -13,6 +13,31 @@ pub const MAX_INSTANCES: u64 = 100_000;
 pub const MAX_MATERIALS: u64 = 1_000;
 pub const MAX_TEXTURES: u32 = 256;
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MeshletData {
+    // 16 байт (4 поля по 4 байта)
+    pub vertex_offset: u32,
+    pub vertex_count: u32,
+    pub index_offset: u32,
+    pub triangle_count: u32,
+    
+    // 16 байт (4 поля по 4 байта)
+    pub instance_id: u32,
+    pub bounding_center_x: f32,
+    pub bounding_center_y: f32,
+    pub bounding_center_z: f32,
+    
+    // 16 байт (1 поле + 3 поля явного паддинга)
+    pub bounding_radius: f32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+// Итоговый размер структуры: ровно 48 байт (кратно 16). шаг (stride) в массиве будет плотным.
+
+
+
 pub struct StaticBindlessResources {    
     pub mega_vertex_buffer: wgpu::Buffer,
     pub mega_index_buffer: wgpu::Buffer,
@@ -25,6 +50,10 @@ pub struct StaticBindlessResources {
     
     pub culling_tasks_buffer: wgpu::Buffer,    
     pub visible_instances_buffer: wgpu::Buffer,
+
+    // Добавьте это поле в вашу структуру StaticBindlessResources:
+    pub global_meshlets_buffer: wgpu::Buffer,
+
     
     pub indirect_commands_template_buffer: wgpu::Buffer,
     pub indirect_commands_buffer: wgpu::Buffer,
@@ -104,7 +133,15 @@ impl StaticBindlessResources {
             size: MAX_INSTANCES * (size_of::<VisibleInstanceData>() as u64),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });        
+        });
+
+        let global_meshlets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Global Meshlets Buffer"),
+            size: 48, // Размер одного MeshletData для теста
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
 
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Indirect Commands Buffer"),
@@ -167,6 +204,16 @@ impl StaticBindlessResources {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },                
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4, // Новый binding 4
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -235,7 +282,7 @@ impl StaticBindlessResources {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/static_bindless.wgsl")))
         });
 
-        let gpu_driven_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let render_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("GPU Driven Render Bind Group Layout"),
             entries: &[
                 // Binding 0: Nodes
@@ -289,6 +336,16 @@ impl StaticBindlessResources {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4, // Новый binding 4
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
             ],
         });
                 
@@ -379,7 +436,7 @@ impl StaticBindlessResources {
             bind_group_layouts: &[
                 Some(&materials_bind_group_layout), // @group(0)
                 Some(&camera_bind_group_layout),    // @group(1)
-                Some(&gpu_driven_bind_group_layout), // @group(2)
+                Some(&render_bind_group_layout), // @group(2)
             ],
             immediate_size: 0,
         });
@@ -565,7 +622,9 @@ impl StaticBindlessResources {
                     resource: materials_buffer.as_entire_binding(),
                 },
             ],
-        });
+        });        
+
+        let matrix_texture_view = Self::load_matrices_into_texture(device, queue, &mut init_data.joints);
 
         let culling_compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Culling Compute Bind Group"),
@@ -587,14 +646,16 @@ impl StaticBindlessResources {
                     binding: 3,
                     resource: indirect_commands_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: global_meshlets_buffer.as_entire_binding()
+                },                
             ],
         });
 
-        let matrix_texture_view = Self::load_matrices_into_texture(device, queue, &mut init_data.joints);
-
         let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("GPU Driven Render Bind Group"),
-            layout: &gpu_driven_bind_group_layout, // @group(2)
+            layout: &render_bind_group_layout, // @group(2)
             entries: &[                
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -613,6 +674,10 @@ impl StaticBindlessResources {
                     binding: 3,
                     resource: visible_instances_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: global_meshlets_buffer.as_entire_binding(),
+                },                
             ],
         });
 
@@ -623,15 +688,14 @@ impl StaticBindlessResources {
             mega_index_buffer,
             camera_buffer,
             instances_buffer,
-            nodes_buffer,
-            //joints_buffer,
+            nodes_buffer,            
             materials_buffer,
             culling_tasks_buffer,
             visible_instances_buffer,
+            global_meshlets_buffer,
             indirect_commands_template_buffer,
             indirect_commands_buffer,
-            culling_compute_pipeline,
-            //clear_commands_pipeline,
+            culling_compute_pipeline,            
             render_pipeline,
             materials_bind_group,
             camera_bind_group,
