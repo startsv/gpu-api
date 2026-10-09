@@ -125,8 +125,16 @@ fn vs_main(
     vertex_input: VertexInput, 
     @builtin(instance_index) draw_instance_idx: u32
 ) -> FragmentInput {    
+    // 1. Читаем данные видимого инстанса (как и раньше в вашей старой схеме)
     let render_data = visible_instances[draw_instance_idx];
-    let instance = global_instances[render_data.instance_id];
+    
+    // 2. ВРЕМЕННО: берем ID мешлета равным ID инстанса 
+    // (так как сейчас у нас 1 объект = 1 мешлет)
+    let global_meshlet_id = render_data.instance_id;
+    let meshlet = global_meshlets[global_meshlet_id];
+    
+    // 3. Достаем инстанс, используя привязку внутри мешлета!
+    let instance = global_instances[meshlet.instance_id];
     var model_matrix = instance.model_matrix;
     let node = global_nodes[instance.node_index];
     
