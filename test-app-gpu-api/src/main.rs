@@ -9,7 +9,7 @@ use wgpu::{CurrentSurfaceTexture, DeviceDescriptor, ExperimentalFeatures, Memory
 use winit::{event_loop::EventLoopProxy, platform::web::{WindowExtWebSys, EventLoopExtWebSys}};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
-use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, surface_bindless_pipeline::SurfaceBindlessResources}};
+use gpu_api::{camera::{CAMERA_UNIFORM_SIZE, create_camera}, frame_counter::FrameCounter, pipeline::{self, aa_line_pipeline::AaLineInstance, image_pipeline::{ImageObject, ImageQuad}, line_pipeline::LineVertex, model_pipeline::model::{Object, ObjectGroup}, solid_quad_pipeline::{self, Transformation}, static_bindless_pipeline::SizeConfig, surface_bindless_pipeline::SurfaceBindlessResources}};
 use gpu_api_dto::{AnimationComputationMode, AnimationProperty, ViewSource};
 use world::world::World;
 use crate::test_data::{generate_grid, generate_n_cubes_scene, generate_test_surface};
@@ -223,10 +223,21 @@ async fn run() {
     );
     
     let static_test_data = generate_n_cubes_scene(10);
-    let static_commands_total = static_test_data.3.len();    
-    let static_draw_commands_len = static_commands_total as u32;
+    let static_commands_total = static_test_data.3.len();
 
-    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, &camera_uniform, model_depth_stencil_state, static_commands_total, &mut init_data);
+    let static_size_config = SizeConfig {
+        max_vertices: 1_000_000,
+        max_indices: 3_000_000,
+        max_instances: 100_000,
+        max_materials: 1_000,
+        max_textures: 256,
+        max_meshlets: 200,
+        max_indirect_commands: 200,
+        bytes_to_clear: static_commands_total as u64 * size_of::<DrawIndexedIndirectCommand>() as u64,
+        commands_to_draw: static_commands_total as u32,
+    };    
+
+    let static_bindless_resources = pipeline::static_bindless_pipeline::StaticBindlessResources::new(&device, &queue, static_size_config, &camera_uniform, model_depth_stencil_state, &mut init_data);
 
     let mut object_group = ObjectGroup {
         active: true,
@@ -904,7 +915,7 @@ async fn run() {
                                     }
                                 );
 
-                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass, static_draw_commands_len);
+                                static_bindless_resources.draw_gpu_driven_frame(&mut render_pass);
                                 surface_resources.draw_gpu_driven_frame(&mut render_pass, surface_data.meshlets.len() as u32);
                                 model_bindless_resources.draw_gpu_driven_frame(&mut render_pass, 2);
                                 //model_pipeline.draw(&mut render_pass, &object_groups);

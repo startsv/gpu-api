@@ -9,15 +9,21 @@ use gpu_api_relay::model_bindless_data::CameraUniform;
 
 pub mod static_bindless_api;
 
-pub const MAX_VERTICES: u64 = 1_000_000;
-pub const MAX_INDICES: u64 = 3_000_000;
-pub const MAX_INSTANCES: u64 = 100_000;
-pub const MAX_MATERIALS: u64 = 1_000;
-pub const MAX_TEXTURES: u32 = 256;
+pub struct SizeConfig {
+    pub max_vertices: u64,
+    pub max_indices: u64,
+    pub max_instances: u64,
+    pub max_materials: u64,
+    pub max_textures: u32,
+    pub max_meshlets: u64,
+    pub max_indirect_commands: u64,
+    pub bytes_to_clear: u64,
+    pub commands_to_draw: u32,
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct MeshletData {
+pub struct MeshletData {    
     // 16 байт (4 поля по 4 байта)
     pub vertex_offset: u32,
     pub vertex_count: u32,
@@ -39,7 +45,8 @@ pub struct MeshletData {
 // Итоговый размер структуры: ровно 48 байт (кратно 16). шаг (stride) в массиве будет плотным.
 
 
-pub struct StaticBindlessResources {    
+pub struct StaticBindlessResources {
+    pub size_config: SizeConfig,
     pub mega_vertex_buffer: wgpu::Buffer,
     pub mega_index_buffer: wgpu::Buffer,
     
@@ -72,76 +79,76 @@ pub struct StaticBindlessResources {
 impl StaticBindlessResources {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,        
+        queue: &wgpu::Queue,
+        size_config: SizeConfig,
         camera_uniform: &CameraUniform,
-        depth_stencil: Option<wgpu::DepthStencilState>,
-        indirect_commands_total: usize,
+        depth_stencil: Option<wgpu::DepthStencilState>,        
         init_data: &mut InitData,
     ) -> Self {                        
         let mega_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Mega Vertex Buffer"),
-            size: MAX_VERTICES * size_of::<Vertex>() as u64,
+            size: size_config.max_vertices * size_of::<Vertex>() as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let mega_index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Mega Index Buffer"),
-            size: MAX_INDICES * 4,
+            size: size_config.max_indices * 4,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Instances Buffer"),
-            size: MAX_INSTANCES * size_of::<InstanceData>() as u64,
+            size: size_config.max_instances * size_of::<InstanceData>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let nodes_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Nodes Buffer"),
-            size: MAX_INSTANCES * size_of::<NodeData>() as u64,
+            size: size_config.max_instances * size_of::<NodeData>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Materials Buffer"),
-            size: MAX_MATERIALS * size_of::<MaterialFactors>() as u64, 
+            size: size_config.max_materials * size_of::<MaterialFactors>() as u64, 
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         
         let culling_tasks_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Culling Tasks Buffer"),
-            size: MAX_INSTANCES * size_of::<CullingTask>() as u64,
+            size: size_config.max_instances * size_of::<CullingTask>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let visible_instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Visible Instances Buffer"),            
-            size: MAX_INSTANCES * (size_of::<VisibleInstanceData>() as u64),
+            size: size_config.max_instances * (size_of::<VisibleInstanceData>() as u64),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let global_meshlets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Global Meshlets Buffer"),
-            size: 100 * 48,
+            size: size_config.max_meshlets * (size_of::<MeshletData>() as u64),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         // Рассчитываем размер на основе реального суммарного количества мешлетов всех инстансов        
         let command_stride = std::mem::size_of::<DrawIndexedIndirectCommand>() as u64; // 20 байт
-        let buffer_size = indirect_commands_total as u64 * command_stride;
+        let indirect_buffer_size = size_config.max_indirect_commands as u64 * command_stride;
 
         // 1. БУФЕР-ШАБЛОН КОМАНД (Хранит дефолтные команды с instance_count = 0)
         let indirect_commands_template_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Indirect Commands Template Buffer"),
-            size: buffer_size,
+            size: indirect_buffer_size,
             // COPY_DST — чтобы инициализировать с CPU через queue.write_buffer
             // COPY_SRC — чтобы каждую операцию clear копировать его содержимое на GPU
             usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
@@ -151,7 +158,7 @@ impl StaticBindlessResources {
         // 2. РАБОЧИЙ БУФЕР КОМАНД (В него пишет Compute-шейдер и из него читает Render)
         let indirect_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("MDI Operating Indirect Commands Buffer"),
-            size: buffer_size, // Размеры должны СТРОГО совпадать до байта
+            size: indirect_buffer_size, // Размеры должны СТРОГО совпадать до байта
             // STORAGE — чтобы Compute-шейдер мог писать в него (read_write)
             // INDIRECT — чтобы Render Pass мог использовать его в multi_draw_indexed_indirect
             // COPY_DST — чтобы принимать данные при сбросе кадра из буфера-шаблона
@@ -351,7 +358,7 @@ impl StaticBindlessResources {
             ],
         });
                 
-        let texture_count = std::num::NonZeroU32::new(MAX_TEXTURES);
+        let texture_count = std::num::NonZeroU32::new(size_config.max_textures);
 
         let materials_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Materials Bind Group Layout"),
@@ -545,7 +552,7 @@ impl StaticBindlessResources {
             ..Default::default()
         });
 
-        let max_textures = MAX_TEXTURES as usize;
+        let max_textures = size_config.max_textures as usize;
         
         let mut base_color_views = vec![&dummy_view; max_textures];
         let mut metallic_roughness_views = vec![&dummy_view; max_textures];
@@ -681,11 +688,10 @@ impl StaticBindlessResources {
                     resource: global_meshlets_buffer.as_entire_binding(),
                 },                
             ],
-        });
+        });        
 
-        //let clear_commands_pipeline = ClearCommandsPipeline::new(device, &indirect_commands_buffer, commands_count as u32);
-
-        Self {    
+        Self {
+            size_config,
             mega_vertex_buffer,
             mega_index_buffer,
             camera_buffer,
@@ -703,6 +709,6 @@ impl StaticBindlessResources {
             camera_bind_group,
             culling_compute_bind_group,
             render_bind_group,
-        }        
+        }
     }
 }

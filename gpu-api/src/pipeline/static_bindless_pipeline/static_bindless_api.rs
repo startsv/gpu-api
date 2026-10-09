@@ -43,8 +43,7 @@ impl StaticBindlessResources {
         camera_uniform: &CameraUniform,
         staging_belt: &mut StagingBelt,
         instances: &[InstanceData],
-        nodes: &[NodeData],
-        //joints: &[Mat4],
+        nodes: &[NodeData],        
         culling_tasks: &[CullingTask],
     ) {
         {                                                                                            
@@ -58,8 +57,7 @@ impl StaticBindlessResources {
         }
 
         queue.write_buffer(&self.instances_buffer, 0, bytemuck::cast_slice(instances));
-        queue.write_buffer(&self.nodes_buffer, 0, bytemuck::cast_slice(nodes));
-        //queue.write_buffer(&self.joints_buffer, 0, bytemuck::cast_slice(joints));
+        queue.write_buffer(&self.nodes_buffer, 0, bytemuck::cast_slice(nodes));        
 
         if culling_tasks.is_empty() == false {
             queue.write_buffer(&self.culling_tasks_buffer, 0, bytemuck::cast_slice(culling_tasks));
@@ -75,7 +73,7 @@ impl StaticBindlessResources {
             0,
             &self.indirect_commands_buffer,
             0,
-            self.indirect_commands_buffer.size(), 
+            self.size_config.bytes_to_clear,
         );
     }
 
@@ -93,15 +91,14 @@ impl StaticBindlessResources {
     pub fn draw_gpu_driven_frame(
         &self,
         render_pass: &mut RenderPass,
-        commands_len: u32
     ) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.materials_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.render_bind_group, &[]);        
+        render_pass.set_bind_group(2, &self.render_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.mega_vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.mega_index_buffer.slice(..), wgpu::IndexFormat::Uint32);        
-        render_pass.multi_draw_indexed_indirect(&self.indirect_commands_buffer, 0, commands_len);
+        render_pass.set_index_buffer(self.mega_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.multi_draw_indexed_indirect(&self.indirect_commands_buffer, 0, self.size_config.commands_to_draw);
     }
 
     pub fn load_matrices_into_texture(device: &wgpu::Device, queue: &wgpu::Queue, joint_matrices: &mut Vec<Mat4>) -> wgpu::TextureView {
