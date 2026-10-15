@@ -8,5 +8,5 @@ edition = "2024"
 bytemuck = "*"
 bytemuck_derive = "*"
 wincode = { git = "https://github.com/anza-xyz/wincode", features = ["derive"] }
-glam = "0.33"
+glam = { version = "0.33", features = ["bytemuck"] }
 bounds = { path = "../../bounds" }
