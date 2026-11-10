@@ -12,6 +12,7 @@ use crate::{pipeline::model_pipeline::{self, MaterialFactorsUniform, INSTANCE_SI
 
 pub struct Object {
     pub name: String,
+    pub is_active: bool,
     pub nodes: Vec<ModelNode>,
     pub node_topological_sorting: Vec<usize>,
     pub node_map: std::collections::BTreeMap<usize, usize>,
@@ -852,6 +853,7 @@ impl Object {
 
         Object {
             name: model_data.name,
+            is_active: true,
             nodes,
             node_topological_sorting: model_data.node_topological_sorting,
             node_map: model_data.node_map,

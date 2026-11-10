@@ -58,7 +58,7 @@ impl Pipeline {
             }
             
             for object in &object_group.objects {
-                if object.instances_count == 0 {
+                if object.is_active == false {
                     continue;
                 }
                 

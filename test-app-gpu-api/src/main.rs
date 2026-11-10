@@ -636,7 +636,7 @@ async fn run() {
                                             continue;
                                         }
                                         
-                                        if object.instances_count == 0 {
+                                        if object.is_active == false {
                                             continue;
                                         }                                        
 
